@@ -1,0 +1,342 @@
+Fuel Sensor Monitoring Portal - Complete Project Specification
+Project Overview
+A comprehensive web-based portal for monitoring fuel sensor data across multiple sites, featuring role-based access control, configurable data views, and modern separated frontend/backend architecture. The system provides different data access levels based on user roles, with admins having the flexibility to toggle between daily closing readings and real-time sensor data.
+Architecture & Technology Stack
+System Architecture
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Frontend      │────│   FastAPI       │────│   PostgreSQL    │
+│   Container     │    │   Backend       │    │   (External)    │
+│   (Port 3000)   │    │   (Port 8000)   │    │   41.191.232.15 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+Backend API (FastAPI)
+
+Framework: FastAPI (Python) with async support
+Purpose: RESTful API handling all business logic, authentication, and data management
+Key Features:
+
+Automatic API documentation (Swagger/OpenAPI)
+High performance async operations
+Robust input validation with Pydantic models
+JWT token authentication middleware
+Background tasks for daily data capture
+Role-based endpoint protection
+
+
+
+Frontend Application
+
+Framework: Modern JavaScript framework (React/Vue.js recommended)
+Communication: Consumes backend API via HTTP requests
+Authentication: JWT token-based with automatic refresh
+State Management: Proper state management for user sessions and role-based data
+Real-time Updates: WebSocket or polling for live data (admin mode only)
+
+Database Structure
+Existing Database (External)
+
+Host: 41.191.232.15 (PostgreSQL on port 5437)
+Connection: Via SSH tunnel with provided credentials
+Database: sensorsdb
+Main Table: sensor_readings
+
+Fields: time, device_id, sensor_name, value, unit
+Sensor Types: fuel_sensor_level, fuel_sensor_temp, fuel_sensor_temperature, fuel_sensor_volume, generator_state, zesa_state
+
+
+
+New Database Tables Required (To be created in existing database)
+
+users - User credentials, roles, and permissions
+sites - Location definitions and configurations
+daily_closing_readings - End-of-day sensor snapshots (captured at 23:55)
+user_site_assignments - Manager/supervisor site mappings
+admin_preferences - Admin display mode settings
+
+User Management & Role-Based Access
+User Roles & Data Access Permissions
+1. Admin Users
+
+System Access: Full access to all sites and devices
+Special Feature: Toggle between two data view modes:
+
+Closing Readings Mode: Daily 23:55 snapshots (same as managers/supervisors)
+Real-time Mode: Live sensor data with current readings
+
+
+Additional Capabilities:
+
+User management and creation
+System configuration access
+Site management and device mapping
+System health monitoring
+
+
+
+2. Manager Users
+
+Access Restriction: Site-specific access (assigned to specific sites only)
+Data Limitation: Can ONLY view daily closing readings (no real-time access)
+View Scope: Dashboard limited to their assigned sites only
+Data Source: Daily snapshots captured at 23:55
+
+3. Supervisor Users
+
+Access Level: Multiple assigned sites (configurable)
+Data Limitation: Can ONLY view daily closing readings (no real-time access)
+Privilege Level: Between manager and admin but without real-time data access
+Data Source: Daily snapshots captured at 23:55
+
+Authentication System
+
+Method: JWT token-based authentication via FastAPI
+Security Features:
+
+Token refresh mechanism
+Role-based middleware for API endpoint protection
+Secure password hashing (bcrypt)
+Session management with automatic logout
+
+
+
+Core Business Logic
+Daily Fuel Reading Capture System
+
+Timing: Automated capture of last fuel reading at 23:55 (11:55 PM) daily
+Implementation: FastAPI background task or scheduled job (Celery)
+Storage: Dedicated daily_closing_readings table
+Captured Metrics:
+
+Fuel level percentage
+Fuel volume (liters)
+Temperature readings
+Generator status
+ZESA (power supply) status
+
+
+
+Data Display Logic by Role
+For Managers & Supervisors
+
+Fixed Display: Always show daily closing readings only
+No Real-time Access: Cannot view live sensor data
+Data Points: View fuel levels as captured at 23:55 each day
+Historical Trends: Based on daily closing data points only
+
+For Admins
+
+Flexible Display: Toggle between two modes with easy interface switch
+Toggle Options:
+
+Closing Mode: Same view as managers/supervisors (daily 23:55 readings)
+Real-time Mode: Live sensor feeds with current readings
+
+
+Default Setting: Configurable default view preference
+Visual Indicator: Clear indication of current data view mode
+
+API Endpoints Structure
+Authentication Endpoints
+
+POST /auth/login - User authentication with role-based tokens
+POST /auth/refresh - JWT token refresh
+POST /auth/logout - Secure session termination
+
+User Management (Admin Only)
+
+GET /users - List all users with roles and assignments
+POST /users - Create new user with role assignment
+PUT /users/{id} - Update user details and permissions
+DELETE /users/{id} - Remove user from system
+
+Data Endpoints
+
+GET /readings/closing/{site_id} - Daily closing readings (all roles)
+GET /readings/realtime/{site_id} - Real-time data (admin only)
+GET /readings/history/{site_id} - Historical data based on user role
+GET /readings/trends/{site_id} - Consumption trends and analytics
+
+Site Management
+
+GET /sites - List sites based on user role and assignments
+POST /sites - Create new site (admin only)
+PUT /sites/{id} - Update site configuration
+PUT /sites/{id}/assignments - Assign users to sites
+
+Admin Configuration
+
+PUT /admin/view-mode - Toggle between closing/real-time display
+GET /admin/view-mode - Get current display mode preference
+GET /admin/system-status - System health and statistics
+
+Dashboard Views & User Interface
+Manager/Supervisor Dashboard
+
+Data Source: Daily closing readings only (fixed)
+Display Elements:
+
+Current fuel levels from last closing (percentage and volume)
+Daily/weekly consumption trends
+Generator and ZESA status from closing readings
+Temperature readings from daily snapshots
+Site-specific charts and analytics
+
+
+Access Scope: Limited to assigned sites only
+
+Admin Dashboard
+
+Data Source: Configurable (toggle between closing and real-time)
+Closing Mode Features:
+
+Same view as managers but across all sites
+Multi-site comparison of daily readings
+Aggregated consumption data
+
+
+Real-time Mode Features:
+
+Live sensor feeds with current status
+Real-time alerts and notifications
+Current operational status across all sites
+
+
+Additional Admin Tools:
+
+User management interface
+Site configuration tools
+System administration panel
+
+
+
+Design Specifications
+Visual Design
+
+Framework: Tailwind CSS for responsive, modern design
+Color Scheme:
+
+Primary: Professional blue theme for main interface
+Accent: Strategic red for alerts, critical metrics, and important actions
+Background: Clean, corporate interface with excellent contrast
+
+
+Layout: Mobile-first responsive design approach
+
+User Experience Elements
+
+Admin Toggle: Prominent but subtle toggle switch for data view mode
+Role Indicators: Clear visual indicators of current user role and data view mode
+Navigation: Intuitive navigation with role-appropriate menus
+Status Indicators: Visual cues for generator status, power supply, and fuel levels
+Charts: Interactive charts and graphs for trend analysis
+
+Key Features & Functionalities
+Role-Based Data Access
+
+Automatic Filtering: API automatically serves appropriate data based on user JWT token
+Admin Toggle: Seamless switching between closing and real-time views
+Consistent Interface: Similar UI across roles with different underlying data sources
+Clear Indicators: Visual cues showing what type of data is being displayed
+
+Real-time Features (Admin Only)
+
+Live Updates: WebSocket or polling for real-time sensor data
+Status Monitoring: Live generator and power supply status
+Alert System: Real-time alerts for critical thresholds
+Automatic Refresh: Configurable data refresh intervals
+
+Reporting & Analytics
+
+Consumption Reports: Daily, weekly, and monthly fuel consumption analysis
+Trend Analysis: Interactive charts and historical data visualization
+Export Capabilities: PDF and Excel export functionality
+Comparative Analytics: Site-to-site comparison metrics
+
+System Administration
+
+User Management: Create, update, and delete users with role assignments
+Site Configuration: Add and configure monitoring sites
+Device Mapping: Link sensor devices to specific sites
+Audit Logging: Track user activities and admin mode switches
+
+Technical Implementation Details
+Backend Requirements (FastAPI)
+
+Authentication: JWT middleware with role-based permissions
+Database ORM: SQLAlchemy with async support for PostgreSQL
+Database Connection: Connect to external PostgreSQL via SSH tunnel
+Validation: Pydantic models for request/response validation
+Background Tasks: Scheduled jobs for daily data capture at 23:55
+API Documentation: Automatic Swagger UI generation
+CORS Configuration: Proper CORS setup for frontend communication
+
+Frontend Requirements
+
+API Integration: Axios/Fetch for API communication with token handling
+State Management: Context API/Redux/Pinia for user sessions and role state
+Authentication: JWT token storage and automatic inclusion in API requests
+Role-based Rendering: Components that render based on user permissions
+Error Handling: Comprehensive error handling for API failures and authentication
+
+Security & Performance
+
+API Rate Limiting: Prevent abuse of real-time endpoints
+Caching Strategy: In-memory caching for frequently accessed closing readings
+Database Optimization: Proper indexing for time-series data queries
+Input Validation: Sanitization and validation of all user inputs
+Audit Logging: Track admin mode switches and sensitive operations
+
+Deployment Specifications
+Containerization
+
+Backend Container: FastAPI application with Python dependencies
+Frontend Container: Built static files served via Nginx
+External Database: Connect to existing PostgreSQL at 41.191.232.15 via SSH tunnel
+
+Docker Compose Configuration
+yaml# Example structure - not full implementation
+services:
+  frontend:
+    ports: ["3000:80"]
+  backend:
+    ports: ["8000:8000"]
+    environment:
+      - SSH_HOST=41.191.232.15
+      - SSH_USERNAME=sa
+      - SSH_PASSWORD=s3rv3r5mx$
+      - DB_NAME=sensorsdb
+      - DB_USER=sa
+      - DB_PASSWORD=s3rv3r5mxdb
+      - REMOTE_BIND_PORT=5437
+Environment Configuration
+
+Production-ready: Proper environment variable management
+SSH Tunnel: Secure connection to external database
+Scalability: Architecture supports multiple sites and concurrent users
+Monitoring: Health checks and logging configuration
+Security: SSL/TLS configuration for production deployment
+
+Database Connection Details
+SSH Tunnel Configuration (For Backend)
+
+SSH Host: 41.191.232.15
+SSH Username: sa
+SSH Password: s3rv3r5mx$
+Remote Bind Host: 127.0.0.1
+Remote Bind Port: 5437
+
+Database Connection
+
+Database Name: sensorsdb
+Database User: sa
+Database Password: s3rv3r5mxdb
+
+Data Flow & Business Process
+
+Sensor Data Collection: Sensors continuously send data to existing PostgreSQL database at 41.191.232.15
+Daily Capture Process: Background job captures end-of-day readings at 23:55 from the external database
+Role-based Data Serving: API serves appropriate data based on user role and permissions
+Admin Toggle Functionality: Admins can switch between closing and real-time data views
+Dashboard Updates: Frontend updates based on user role and selected data mode
+Historical Analysis: System maintains historical data for trend analysis and reporting
+
+This comprehensive specification provides developers with a clear understanding of the system architecture, role-based access control, data flow, and technical requirements needed to build a robust fuel sensor monitoring portal that connects to the existing external database infrastructure.
