@@ -133,3 +133,32 @@ Preferred communication style: Simple, everyday language.
 - **Password Hashing**: bcrypt for secure password storage
 - **Input Validation**: Zod schemas for request validation
 - **CORS Configuration**: Controlled cross-origin access
+
+## Docker Deployment
+
+### Container Architecture
+- **Frontend Container**: React + Vite + Nginx serving on port 80
+- **API Container**: Node.js + Express + TypeScript on port 5000
+- **Database Container**: PostgreSQL 15 with persistent volumes
+- **Multi-stage builds**: Optimized production images with security best practices
+
+### Deployment Options
+- **Production**: Full stack deployment with `docker-compose.yml`
+- **Development**: Hot-reload development environment with `docker-compose.dev.yml`
+- **Quick Start**: Automated setup scripts in `scripts/` directory
+
+### Key Features
+- Health check endpoints for container orchestration
+- Persistent data storage with Docker volumes
+- Nginx reverse proxy for API routing
+- Environment-based configuration
+- Automated database initialization
+- Container security with non-root users
+
+### Recent Changes (July 22, 2025)
+- Added comprehensive Docker configuration files
+- Created multi-stage Dockerfile for API with development and production targets
+- Implemented Nginx-based frontend container with API proxying
+- Added health check endpoints and container orchestration
+- Created setup scripts for easy deployment
+- Updated build process to support containerized deployment

@@ -34,6 +34,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await dbConnection.connect();
   scheduler.start();
 
+  // Health check endpoint for Docker
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "healthy", timestamp: new Date().toISOString() });
+  });
+
   // Authentication endpoints
   app.post("/api/auth/login", async (req, res) => {
     try {
