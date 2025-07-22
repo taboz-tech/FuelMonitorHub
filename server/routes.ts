@@ -31,8 +31,12 @@ import { eq, desc, and, inArray, sql } from "drizzle-orm";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize database connection and scheduler
-  await dbConnection.connect();
-  scheduler.start();
+  try {
+    await dbConnection.connect();
+    scheduler.start();
+  } catch (error) {
+    console.error("Failed to initialize database:", error);
+  }
 
   // Health check endpoint for Docker
   app.get("/api/health", (req, res) => {
@@ -43,6 +47,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/auth/login", async (req, res) => {
     try {
       const { username, password } = loginSchema.parse(req.body);
+      
+      // Ensure database is connected
+      if (!dbConnection.db) {
+        await dbConnection.connect();
+      }
       const db = getDb();
 
       const user = await db

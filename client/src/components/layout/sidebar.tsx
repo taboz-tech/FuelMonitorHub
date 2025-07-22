@@ -17,7 +17,7 @@ const navigation = [
 
 const adminNavigation = [
   { name: 'User Management', href: '/users', icon: Users, current: false },
-  { name: 'System Config', href: '/system', icon: Settings, current: false },
+  { name: 'System Config', href: '/system-config', icon: Settings, current: false },
 ];
 
 export default function Sidebar() {

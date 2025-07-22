@@ -76,7 +76,7 @@ export default function Dashboard() {
               
               <Button 
                 onClick={() => refetch()}
-                className="flex items-center px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition duration-200"
+                className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition duration-200"
               >
                 <RefreshCw className="w-4 h-4 mr-2" />
                 Refresh Data

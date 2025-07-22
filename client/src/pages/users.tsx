@@ -58,7 +58,7 @@ export default function Users() {
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case 'admin':
-        return 'bg-purple-100 text-purple-800';
+        return 'bg-red-100 text-red-800';
       case 'supervisor':
         return 'bg-blue-100 text-blue-800';
       case 'manager':
@@ -106,7 +106,7 @@ export default function Users() {
                 <h2 className="text-2xl font-bold text-gray-900">User Management</h2>
                 <p className="text-gray-600 mt-1">Manage user accounts and permissions</p>
               </div>
-              <Button className="bg-primary text-white px-4 py-2 rounded-lg hover:bg-primary/90 transition duration-200">
+              <Button className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition duration-200">
                 <Plus className="w-4 h-4 mr-2" />
                 Add User
               </Button>

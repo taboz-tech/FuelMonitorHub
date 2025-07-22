@@ -24,14 +24,17 @@
   --ring: hsl(20, 14.3%, 4.1%);
   --radius: 0.5rem;
   
-  /* Custom fuel monitor colors */
+  /* Custom fuel monitor colors with red accents */
   --primary-50: hsl(207, 89%, 96%);
   --primary-100: hsl(207, 89%, 91%);
   --primary-500: hsl(207, 90%, 54%);
   --primary-600: hsl(207, 90%, 48%);
   --primary-700: hsl(207, 90%, 42%);
-  --accent-500: hsl(0, 67%, 52%);
-  --accent-600: hsl(0, 67%, 46%);
+  --accent-red-50: hsl(0, 67%, 96%);
+  --accent-red-100: hsl(0, 67%, 91%);
+  --accent-red-500: hsl(0, 67%, 52%);
+  --accent-red-600: hsl(0, 67%, 46%);
+  --accent-red-700: hsl(0, 67%, 40%);
   --success-50: hsl(123, 43%, 96%);
   --success-100: hsl(123, 43%, 91%);
   --success-500: hsl(123, 46%, 34%);
@@ -74,11 +77,11 @@
 
 @layer utilities {
   .nav-active {
-    @apply bg-primary/10 text-primary;
+    @apply bg-blue-100 text-blue-700;
   }
 
   .fuel-level-normal {
-    @apply bg-primary;
+    @apply bg-blue-600;
   }
 
   .fuel-level-low {
@@ -99,5 +102,17 @@
 
   .status-warning {
     @apply bg-yellow-500;
+  }
+
+  .alert-card {
+    @apply border-l-4 border-red-500 bg-red-50;
+  }
+
+  .success-card {
+    @apply border-l-4 border-green-500 bg-green-50;
+  }
+
+  .warning-card {
+    @apply border-l-4 border-yellow-500 bg-yellow-50;
   }
 }
