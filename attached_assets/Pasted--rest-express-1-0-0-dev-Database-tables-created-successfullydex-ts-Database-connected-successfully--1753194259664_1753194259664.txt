@@ -1,0 +1,51 @@
+> rest-express@1.0.0 dev
+Database tables created successfullydex.ts
+Database connected successfully
+Data capture scheduler started - daily readings at 23:55
+2:20:20 PM [express] serving on port 5000
+Browserslist: browsers data (caniuse-lite) is 9 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+node:events:502
+      throw er; // Unhandled 'error' event
+      ^
+
+error: terminating connection due to administrator command
+    at Parser.parseErrorMessage (/home/runner/workspace/node_modules/pg-protocol/src/parser.ts:369:69)
+    at Parser.handlePacket (/home/runner/workspace/node_modules/pg-protocol/src/parser.ts:187:21)
+    at Parser.parse (/home/runner/workspace/node_modules/pg-protocol/src/parser.ts:102:30)
+    at TLSSocket.<anonymous> (/home/runner/workspace/node_modules/pg-protocol/src/index.ts:7:48)
+    at TLSSocket.emit (node:events:524:28)
+    at addChunk (node:internal/streams/readable:561:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:512:3)
+    at Readable.push (node:internal/streams/readable:392:5)
+    at TLSWrap.onStreamRead (node:internal/stream_base_commons:191:23)
+Emitted 'error' event on Client instance at:
+    at Client._handleErrorEvent (/home/runner/workspace/node_modules/pg/lib/client.js:350:10)
+    at Client._handleErrorMessage (/home/runner/workspace/node_modules/pg/lib/client.js:361:12)
+    at Connection.emit (node:events:524:28)
+    at /home/runner/workspace/node_modules/pg/lib/connection.js:116:12
+    at Parser.parse (/home/runner/workspace/node_modules/pg-protocol/src/parser.ts:103:9)
+    at TLSSocket.<anonymous> (/home/runner/workspace/node_modules/pg-protocol/src/index.ts:7:48)
+    [... lines matching original stack trace ...]
+    at TLSWrap.onStreamRead (node:internal/stream_base_commons:191:23) {
+  length: 116,
+  severity: 'FATAL',
+  code: '57P01',
+  detail: undefined,
+  hint: undefined,
+  position: undefined,
+  internalPosition: undefined,
+  internalQuery: undefined,
+  where: undefined,
+  schema: undefined,
+  table: undefined,
+  column: undefined,
+  dataType: undefined,
+  constraint: undefined,
+  file: 'postgres.c',
+  line: '3289',
+  routine: 'ProcessInterrupts'
+}
+
+Node.js v20.19.3

@@ -5,18 +5,41 @@ import * as schema from '@shared/schema';
 class DatabaseConnection {
   private pgClient: Client | null = null;
   private db: ReturnType<typeof drizzle> | null = null;
+  private isConnecting: boolean = false;
 
   async connect() {
-    if (this.db) return this.db;
+    if (this.db && this.pgClient && !this.pgClient.ended) return this.db;
+    
+    if (this.isConnecting) {
+      // Wait for existing connection attempt
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return this.connect();
+    }
+
+    this.isConnecting = true;
 
     try {
+      // Clean up existing connection if needed
+      if (this.pgClient && !this.pgClient.ended) {
+        await this.pgClient.end();
+      }
+
       // Use the local PostgreSQL database created by Replit
       const dbConfig = {
         connectionString: process.env.DATABASE_URL,
       };
 
-      // Create PostgreSQL client
+      // Create PostgreSQL client with error handling
       this.pgClient = new Client(dbConfig);
+      
+      // Add error handler to prevent crashes
+      this.pgClient.on('error', (err) => {
+        console.error('PostgreSQL client error:', err);
+        // Reset connection on error
+        this.db = null;
+        this.pgClient = null;
+      });
+
       await this.pgClient.connect();
       
       this.db = drizzle(this.pgClient, { schema });
@@ -28,7 +51,11 @@ class DatabaseConnection {
       return this.db;
     } catch (error) {
       console.error('Database connection failed:', error);
+      this.db = null;
+      this.pgClient = null;
       throw error;
+    } finally {
+      this.isConnecting = false;
     }
   }
 
@@ -88,7 +115,7 @@ class DatabaseConnection {
 
       -- Create default admin user if not exists
       INSERT INTO users (username, email, password, role, full_name)
-      VALUES ('admin', 'admin@fuelmonitor.com', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin', 'System Administrator')
+      VALUES ('admin', 'admin@fuelmonitor.com', '$2b$10$.XgW4LNBHnMqCnGczUy5/etAp/KCsAYtTexha2Nn5toSsU.2ai6v.', 'admin', 'System Administrator')
       ON CONFLICT (username) DO NOTHING;
 
       -- Create sample sites if not exists
