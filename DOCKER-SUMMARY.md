@@ -23,13 +23,13 @@
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Frontend      │    │      API        │    │   Database      │
+│   Frontend      │    │      API        │    │  External DB    │
 │   (Nginx)       │    │   (Node.js)     │    │  (PostgreSQL)   │
-│   Port: 80      │◄──►│   Port: 5000    │◄──►│   Port: 5432    │
-│                 │    │                 │    │                 │
-│ - Static files  │    │ - JWT auth      │    │ - Persistent    │
-│ - API proxy     │    │ - Role control  │    │   data storage  │
-│ - Client routes │    │ - Scheduler     │    │ - Health check  │
+│   Port: 80      │◄──►│   Port: 5000    │◄──►│ 41.191.232.15   │
+│                 │    │                 │    │    :5437        │
+│ - Static files  │    │ - JWT auth      │    │                 │
+│ - API proxy     │    │ - Role control  │    │ - SSH tunnel    │
+│ - Client routes │    │ - SSH tunnel    │    │ - Real data     │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
@@ -84,20 +84,21 @@ docker-compose -f docker-compose.dev.yml up -d
 
 ### Required for Production
 ```env
-# Database
-POSTGRES_DB=fuel_monitoring
-POSTGRES_USER=fuelmonitor
-POSTGRES_PASSWORD=secure_password_here
+# SSH Tunnel Configuration
+SSH_HOST=41.191.232.15
+SSH_USERNAME=sa
+SSH_PASSWORD=s3rv3r5mx$
+REMOTE_BIND_HOST=127.0.0.1
+REMOTE_BIND_PORT=5437
 
-# API
+# Database Configuration
+DB_NAME=sensorsdb
+DB_USER=sa
+DB_PASSWORD=s3rv3r5mxdb
+
+# API Configuration
 JWT_SECRET=your_jwt_secret_key_here
 NODE_ENV=production
-```
-
-### Optional External Database
-```env
-# External PostgreSQL connection
-DATABASE_URL=postgresql://user:password@host:5432/database
 ```
 
 ## Access URLs
@@ -109,7 +110,7 @@ DATABASE_URL=postgresql://user:password@host:5432/database
 
 ### Development  
 - **API**: http://localhost:5000
-- **Database**: localhost:5432
+- **Database**: External SSH tunnel to 41.191.232.15:5437
 
 ## Default Credentials
 - **Username**: admin

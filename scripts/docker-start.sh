@@ -23,17 +23,11 @@ fi
 # Create environment file if it doesn't exist
 if [ ! -f .env ]; then
     echo "📝 Creating default environment file..."
-    cat > .env << EOF
-# Database Configuration
-POSTGRES_DB=fuel_monitoring
-POSTGRES_USER=fuelmonitor
-POSTGRES_PASSWORD=secure_password_$(openssl rand -hex 8)
-
-# API Configuration
-JWT_SECRET=jwt_secret_$(openssl rand -hex 32)
-NODE_ENV=production
-EOF
-    echo "✅ Environment file created with random passwords"
+    cp .env.example .env
+    # Generate secure JWT secret
+    JWT_SECRET=$(openssl rand -hex 32)
+    sed -i "s/your-super-secret-jwt-key-change-in-production/$JWT_SECRET/" .env
+    echo "✅ Environment file created with secure JWT secret"
 fi
 
 # Build and start services
@@ -60,6 +54,10 @@ if docker-compose ps | grep -q "Up"; then
     echo "🔐 Default login credentials:"
     echo "   Username: admin"
     echo "   Password: secret"
+    echo ""
+    echo "🗄️  Database: Uses existing external SSH tunnel connection"
+    echo "   Host: 41.191.232.15:5437"
+    echo "   Database: sensorsdb"
     echo ""
     echo "📊 Monitor logs with: docker-compose logs -f"
     echo "🛑 Stop services with: docker-compose down"

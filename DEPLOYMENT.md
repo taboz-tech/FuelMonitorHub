@@ -81,34 +81,40 @@ docker-compose -f docker-compose.dev.yml logs -f
   - Automated daily data capture
   - Health check endpoint
 
-### Database Container
-- **Technology**: PostgreSQL 15
-- **Port**: 5432  
+### Database Connection
+- **Technology**: External PostgreSQL via SSH tunnel
+- **Host**: 41.191.232.15:5437
+- **Database**: sensorsdb
 - **Features**:
-  - Persistent data storage
-  - Automatic table initialization
-  - Health monitoring
-  - Sample data creation
+  - SSH tunnel for secure remote access
+  - Existing production database
+  - Real sensor data integration
 
 ## Configuration
 
 ### Environment Variables
 
-Create a `.env` file for custom configuration:
+The application uses the following environment variables (already configured in docker-compose files):
 
 ```env
+# SSH Tunnel Configuration
+SSH_HOST=41.191.232.15
+SSH_USERNAME=sa
+SSH_PASSWORD=s3rv3r5mx$
+REMOTE_BIND_HOST=127.0.0.1
+REMOTE_BIND_PORT=5437
+
 # Database Configuration
-POSTGRES_DB=fuel_monitoring
-POSTGRES_USER=fuelmonitor  
-POSTGRES_PASSWORD=your_secure_password
+DB_NAME=sensorsdb
+DB_USER=sa
+DB_PASSWORD=s3rv3r5mxdb
 
 # API Configuration
 JWT_SECRET=your_jwt_secret_key
 NODE_ENV=production
-
-# External Database (Optional)
-# DATABASE_URL=postgresql://user:pass@host:5432/db
 ```
+
+Copy `.env.example` to `.env` if you need to customize any values.
 
 ### Volume Persistence
 
@@ -145,15 +151,17 @@ docker-compose logs --tail=100 api
 ```
 
 ### Database Operations
+The database is external and accessed via SSH tunnel. For database operations:
+
 ```bash
-# Connect to database
-docker-compose exec database psql -U fuelmonitor -d fuel_monitoring
+# Database is accessed through the API container's SSH tunnel
+# Direct database access requires SSH connection to 41.191.232.15
 
-# Create backup
-docker-compose exec database pg_dump -U fuelmonitor fuel_monitoring > backup.sql
+# View database logs through API container
+docker-compose logs api
 
-# Restore backup
-docker-compose exec -T database psql -U fuelmonitor fuel_monitoring < backup.sql
+# Database schema updates through API
+docker-compose exec api npm run db:push
 ```
 
 ## Updates & Maintenance

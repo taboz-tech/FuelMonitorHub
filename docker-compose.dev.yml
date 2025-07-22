@@ -1,24 +1,6 @@
 version: '3.8'
 
 services:
-  # Development Database
-  database:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_DB: fuel_monitoring_dev
-      POSTGRES_USER: fuelmonitor
-      POSTGRES_PASSWORD: dev_password_123
-      POSTGRES_HOST_AUTH_METHOD: trust
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_dev_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U fuelmonitor -d fuel_monitoring_dev"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-
   # Development API Backend (hot reload)
   api-dev:
     build:
@@ -29,16 +11,19 @@ services:
       - "5000:5000"
     environment:
       NODE_ENV: development
-      DATABASE_URL: postgresql://fuelmonitor:dev_password_123@database:5432/fuel_monitoring_dev
+      # SSH Tunnel Configuration
+      SSH_HOST: 41.191.232.15
+      SSH_USERNAME: sa
+      SSH_PASSWORD: s3rv3r5mx$
+      REMOTE_BIND_HOST: 127.0.0.1
+      REMOTE_BIND_PORT: 5437
+      # Database Configuration
+      DB_NAME: sensorsdb
+      DB_USER: sa
+      DB_PASSWORD: s3rv3r5mxdb
       JWT_SECRET: dev-jwt-secret-key
       PORT: 5000
     volumes:
       - .:/app
       - /app/node_modules
-    depends_on:
-      database:
-        condition: service_healthy
     command: ["npm", "run", "dev"]
-
-volumes:
-  postgres_dev_data:

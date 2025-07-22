@@ -162,3 +162,6 @@ Preferred communication style: Simple, everyday language.
 - Added health check endpoints and container orchestration
 - Created setup scripts for easy deployment
 - Updated build process to support containerized deployment
+- Configured Docker to use external PostgreSQL database via SSH tunnel
+- Removed database containerization to use existing sensorsdb at 41.191.232.15:5437
+- Updated environment variables for production SSH tunnel connection
