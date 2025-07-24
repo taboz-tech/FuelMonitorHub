@@ -156,12 +156,13 @@ Preferred communication style: Simple, everyday language.
 - Container security with non-root users
 
 ### Recent Changes (July 22, 2025)
-- Added comprehensive Docker configuration files
-- Created multi-stage Dockerfile for API with development and production targets
-- Implemented Nginx-based frontend container with API proxying
-- Added health check endpoints and container orchestration
-- Created setup scripts for easy deployment
-- Updated build process to support containerized deployment
-- Configured Docker to use external PostgreSQL database via SSH tunnel
-- Removed database containerization to use existing sensorsdb at 41.191.232.15:5437
-- Updated environment variables for production SSH tunnel connection
+- Fixed database connection issues with auto-reconnection logic
+- Added comprehensive System Configuration page with 5 tabs (General, Database, Scheduler, Security, Notifications)
+- Enhanced UI with red color accents balanced with blue primary theme
+- Improved Docker configuration for Docker 28.2.1 compatibility
+- Added proper build scripts and esbuild configuration for production
+- Created deployment scripts and comprehensive documentation
+- Fixed authentication retry logic for database disconnections
+- Updated all interface elements with red accents for alerts and actions
+- Optimized Docker compose configuration with health checks
+- Added automated deployment guide for production use

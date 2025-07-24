@@ -16,7 +16,9 @@ CMD ["npm", "run", "dev"]
 FROM base AS builder
 RUN npm ci
 COPY . .
-RUN npm run build
+# Create the dist directory and build the server
+RUN mkdir -p dist
+RUN npx esbuild server/index.ts --bundle --platform=node --target=node20 --outfile=dist/index.js --external:pg --external:ssh2 --external:bcrypt --external:jsonwebtoken --external:drizzle-orm --external:@neondatabase/serverless --external:node-cron --external:express --external:express-session --external:memorystore --external:connect-pg-simple --external:passport --external:passport-local --format=cjs
 
 # Production stage
 FROM node:20-alpine AS production
@@ -33,12 +35,12 @@ COPY --from=builder /app/dist ./dist
 # Copy any runtime files needed
 COPY --from=builder /app/shared ./shared
 
-# Install tsx globally for TypeScript execution
-RUN npm install -g tsx
-
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S nodejs -u 1001
+
+# Change ownership of the app directory
+RUN chown -R nodejs:nodejs /app
 USER nodejs
 
 # Expose port

@@ -32,12 +32,17 @@ class DatabaseConnection {
       // Create PostgreSQL client with error handling
       this.pgClient = new Client(dbConfig);
       
-      // Add error handler to prevent crashes
+      // Add error handler to prevent crashes and auto-reconnect
       this.pgClient.on('error', (err) => {
         console.error('PostgreSQL client error:', err);
         // Reset connection on error
         this.db = null;
         this.pgClient = null;
+        // Auto-reconnect after 5 seconds
+        setTimeout(() => {
+          console.log('Attempting to reconnect after error...');
+          this.connect().catch(console.error);
+        }, 5000);
       });
 
       await this.pgClient.connect();

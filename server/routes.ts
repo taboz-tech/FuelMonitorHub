@@ -48,11 +48,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { username, password } = loginSchema.parse(req.body);
       
-      // Ensure database is connected
-      if (!dbConnection.db) {
-        await dbConnection.connect();
+      // Ensure database is connected with retry logic
+      let db;
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          if (!dbConnection.db) {
+            await dbConnection.connect();
+          }
+          db = getDb();
+          break;
+        } catch (error) {
+          console.error(`Database connection attempt failed, ${retries} retries left:`, error);
+          retries--;
+          if (retries === 0) throw error;
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
       }
-      const db = getDb();
 
       const user = await db
         .select()
