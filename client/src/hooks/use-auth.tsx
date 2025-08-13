@@ -26,12 +26,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Check for existing token on app initialization
     const token = localStorage.getItem('auth_token');
     if (token) {
-      // Verify token is still valid by making a test request
-      fetch('/api/dashboard', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      })
+      // Verify token is still valid by making a test request using apiRequest
+      apiRequest('GET', '/api/dashboard')
         .then(response => {
           if (response.ok) {
             // Token is valid, get user info from token

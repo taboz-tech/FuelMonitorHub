@@ -1,12 +1,11 @@
-# Frontend Dockerfile
-FROM node:20-alpine AS builder
+FROM node:20-alpine as build
 
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
-# Install all dependencies (including dev dependencies for build)
+# Install dependencies
 RUN npm ci
 
 # Copy source code
@@ -18,19 +17,49 @@ COPY tailwind.config.ts ./
 COPY tsconfig.json ./
 COPY vite.config.ts ./
 
-# Build the frontend
-RUN npm run build
+# Build arguments
+ARG REACT_APP_API_BASE_URL
+ARG REACT_APP_VERSION
+ARG GENERATE_SOURCEMAP
+
+# Set environment variables for build
+ENV REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL
+ENV REACT_APP_VERSION=$REACT_APP_VERSION
+ENV GENERATE_SOURCEMAP=$GENERATE_SOURCEMAP
+
+# Build the frontend (using your vite config which outputs to dist/public)
+RUN npm run build 2>/dev/null || npx vite build
+
+# Debug: List what was built
+RUN ls -la dist/
+RUN ls -la dist/public/ || echo "No public directory found"
+
+# Debug: Check if index.html exists in the right place
+RUN test -f dist/public/index.html && echo "index.html found in dist/public" || echo "index.html NOT found in dist/public"
 
 # Production stage
-FROM nginx:alpine
+FROM node:20-alpine
 
-# Copy built files to nginx
-COPY --from=builder /app/dist /usr/share/nginx/html
+WORKDIR /app
 
-# Copy nginx configuration
-COPY nginx.conf /etc/nginx/nginx.conf
+# Install serve package globally
+RUN npm install -g serve
 
-# Expose port 80
-EXPOSE 80
+# Copy built files from build stage (from the correct location)
+COPY --from=build /app/dist/public ./dist
 
-CMD ["nginx", "-g", "daemon off;"]
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S nodejs -u 1001
+RUN chown -R nodejs:nodejs /app
+USER nodejs
+
+# Set environment variables for runtime
+ENV NODE_ENV=production
+ENV PORT=4173
+
+# Expose port 4173
+EXPOSE 4173
+
+# Start the app (ensure SPA routing works)
+CMD ["serve", "-s", "dist", "-l", "4173", "--single"]

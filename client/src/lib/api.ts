@@ -1,4 +1,10 @@
+// lib/api.ts
 import { queryClient } from "./queryClient";
+
+// Get the API base URL from environment variable
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:4172';
+
+console.log('API Base URL:', API_BASE_URL); // Debug log
 
 export async function apiRequest(
   method: string,
@@ -17,7 +23,12 @@ export async function apiRequest(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(url, {
+  // Construct full URL
+  const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
+  
+  console.log('Making API request to:', fullUrl); // Debug log
+
+  const res = await fetch(fullUrl, {
     method,
     headers,
     body: data ? JSON.stringify(data) : undefined,

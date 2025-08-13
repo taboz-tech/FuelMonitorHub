@@ -1,11 +1,16 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Client } from 'pg';
+import { Client as SSHClient } from 'ssh2';
+import * as net from 'net';
 import * as schema from '@shared/schema';
 
 class DatabaseConnection {
   private pgClient: Client | null = null;
   private db: ReturnType<typeof drizzle> | null = null;
+  private sshClient: SSHClient | null = null;
+  private localServer: net.Server | null = null;
   private isConnecting: boolean = false;
+  private tunnelPort: number = 5432;
 
   async connect() {
     if (this.db && this.pgClient && !this.pgClient.ended) return this.db;
@@ -19,12 +24,17 @@ class DatabaseConnection {
     this.isConnecting = true;
 
     try {
-      // Clean up existing connection if needed
-      if (this.pgClient && !this.pgClient.ended) {
-        await this.pgClient.end();
+      // Clean up existing connections if needed
+      await this.disconnect();
+
+      // First establish SSH tunnel if we have SSH configuration
+      if (process.env.SSH_HOST && process.env.SSH_USERNAME) {
+        console.log('Establishing SSH tunnel...');
+        await this.createSSHTunnel();
+        console.log('SSH tunnel established successfully');
       }
 
-      // Use the local PostgreSQL database created by Replit
+      // Database configuration
       const dbConfig = {
         connectionString: process.env.DATABASE_URL,
       };
@@ -56,12 +66,94 @@ class DatabaseConnection {
       return this.db;
     } catch (error) {
       console.error('Database connection failed:', error);
-      this.db = null;
-      this.pgClient = null;
+      await this.disconnect();
       throw error;
     } finally {
       this.isConnecting = false;
     }
+  }
+
+  private async createSSHTunnel(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.sshClient = new SSHClient();
+      
+      this.sshClient.on('ready', () => {
+        console.log('SSH connection established');
+        
+        // Create a local server to listen for database connections
+        this.localServer = net.createServer((clientSocket) => {
+          console.log('Local connection received, forwarding through SSH tunnel');
+          
+          // Forward the connection through SSH tunnel
+          this.sshClient!.forwardOut(
+            '127.0.0.1', // source host
+            0, // source port (0 = random)
+            process.env.REMOTE_BIND_HOST || '127.0.0.1', // destination host on remote server
+            parseInt(process.env.REMOTE_BIND_PORT || '5437'), // destination port on remote server
+            (err, stream) => {
+              if (err) {
+                console.error('SSH forward error:', err);
+                clientSocket.end();
+                return;
+              }
+              
+              console.log('SSH stream created, piping data');
+              
+              // Pipe data between client socket and SSH stream
+              clientSocket.pipe(stream);
+              stream.pipe(clientSocket);
+              
+              // Handle connection cleanup
+              stream.on('close', () => {
+                console.log('SSH stream closed');
+                clientSocket.end();
+              });
+              
+              clientSocket.on('close', () => {
+                console.log('Client socket closed');
+                stream.close();
+              });
+              
+              stream.on('error', (err: any) => {
+                console.error('SSH stream error:', err);
+                clientSocket.end();
+              });
+              
+              clientSocket.on('error', (err: any) => {
+                console.error('Client socket error:', err);
+                stream.close();
+              });
+            }
+          );
+        });
+        
+        // Start listening on local port
+        this.localServer.listen(this.tunnelPort, '127.0.0.1', () => {
+          console.log(`SSH tunnel listening on local port ${this.tunnelPort}`);
+          resolve();
+        });
+        
+        this.localServer.on('error', (err) => {
+          console.error('Local server error:', err);
+          reject(err);
+        });
+      });
+
+      this.sshClient.on('error', (err) => {
+        console.error('SSH connection error:', err);
+        reject(err);
+      });
+
+      // Connect to SSH server
+      console.log(`Connecting to SSH server: ${process.env.SSH_HOST}:22`);
+      this.sshClient.connect({
+        host: process.env.SSH_HOST,
+        username: process.env.SSH_USERNAME,
+        password: process.env.SSH_PASSWORD,
+        port: 22,
+        readyTimeout: 30000,
+      });
+    });
   }
 
   private async createTables() {
@@ -143,9 +235,32 @@ class DatabaseConnection {
 
   async disconnect() {
     if (this.pgClient) {
-      await this.pgClient.end();
+      try {
+        await this.pgClient.end();
+      } catch (error) {
+        console.error('Error closing PostgreSQL connection:', error);
+      }
       this.pgClient = null;
     }
+    
+    if (this.localServer) {
+      try {
+        this.localServer.close();
+      } catch (error) {
+        console.error('Error closing local server:', error);
+      }
+      this.localServer = null;
+    }
+    
+    if (this.sshClient) {
+      try {
+        this.sshClient.end();
+      } catch (error) {
+        console.error('Error closing SSH connection:', error);
+      }
+      this.sshClient = null;
+    }
+    
     this.db = null;
   }
 

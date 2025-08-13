@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # API Backend
   api:
@@ -8,7 +6,7 @@ services:
       dockerfile: Dockerfile.api
       target: production
     ports:
-      - "5000:5000"
+      - "4172:5000"
     environment:
       NODE_ENV: production
       # SSH Tunnel Configuration
@@ -17,11 +15,12 @@ services:
       SSH_PASSWORD: s3rv3r5mx$
       REMOTE_BIND_HOST: 127.0.0.1
       REMOTE_BIND_PORT: 5437
-      # Database Configuration
+      # Database Configuration (PostgreSQL URL format)
+      DATABASE_URL: postgresql://sa:s3rv3r5mxdb@127.0.0.1:5432/sensorsdb
       DB_NAME: sensorsdb
       DB_USER: sa
       DB_PASSWORD: s3rv3r5mxdb
-      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      JWT_SECRET: c8f2e1e8d65f6fa3eff0d06ca3377dcd6a6918284f522ff70eba7eabea997994
       PORT: 5000
     restart: unless-stopped
     healthcheck:
@@ -35,8 +34,26 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+      args:
+        REACT_APP_API_BASE_URL: http://localhost:4172
+        REACT_APP_VERSION: 1.0.0
+        GENERATE_SOURCEMAP: false
     ports:
-      - "80:80"
+      - "4173:4173"
+    environment:
+      - NODE_ENV=production
+      - REACT_APP_API_BASE_URL=http://localhost:4172
+      - REACT_APP_VERSION=1.0.0
     depends_on:
       - api
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4173"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
