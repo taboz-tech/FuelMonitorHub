@@ -29,12 +29,19 @@ export default function Dashboard() {
     refetchInterval: 30000, // Refresh every 30 seconds
     onSuccess: (data) => {
       console.log("Dashboard data received:", data);
+      console.log("Sites array:", data?.sites);
+      console.log("Sites length:", data?.sites?.length);
       setDebugInfo(data);
     },
     onError: (error) => {
       console.error("Dashboard query error:", error);
     }
   });
+
+  // Add debugging logs
+  console.log("Dashboard render - dashboardData:", dashboardData);
+  console.log("Dashboard render - isLoading:", isLoading);
+  console.log("Dashboard render - error:", error);
 
   if (!isAuthenticated || !user) {
     return null;
@@ -92,7 +99,17 @@ export default function Dashboard() {
     );
   }
 
-  const hasData = dashboardData && dashboardData.sites?.length > 0;
+  // Enhanced data checking
+  const hasData = dashboardData && dashboardData.sites && Array.isArray(dashboardData.sites) && dashboardData.sites.length > 0;
+  
+  // Debug logging
+  console.log("hasData evaluation:", {
+    dashboardData: !!dashboardData,
+    sites: !!dashboardData?.sites,
+    isArray: Array.isArray(dashboardData?.sites),
+    length: dashboardData?.sites?.length,
+    hasData: hasData
+  });
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -130,6 +147,26 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
+
+          {/* DEBUG INFO - Always show in development */}
+          {(process.env.NODE_ENV === 'development' || !hasData) && (
+            <Card className="mb-4 bg-yellow-50 border-yellow-200">
+              <CardContent className="p-4">
+                <h4 className="font-semibold mb-2 text-yellow-800">Debug Info:</h4>
+                <div className="text-sm space-y-1">
+                  <p>dashboardData exists: <span className="font-mono">{dashboardData ? 'YES' : 'NO'}</span></p>
+                  <p>sites property exists: <span className="font-mono">{dashboardData?.sites ? 'YES' : 'NO'}</span></p>
+                  <p>sites is array: <span className="font-mono">{Array.isArray(dashboardData?.sites) ? 'YES' : 'NO'}</span></p>
+                  <p>sites count: <span className="font-mono">{dashboardData?.sites?.length || 0}</span></p>
+                  <p>hasData result: <span className="font-mono">{hasData ? 'TRUE' : 'FALSE'}</span></p>
+                  <p>viewMode: <span className="font-mono">{dashboardData?.viewMode || 'undefined'}</span></p>
+                  {dashboardData?.sites && (
+                    <p>first site: <span className="font-mono">{dashboardData.sites[0]?.name || 'no name'}</span></p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* System Status Cards */}
           {dashboardData?.systemStatus && (
@@ -186,30 +223,47 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* Site Cards */}
-          {hasData ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8">
-              {dashboardData.sites.map((site) => (
-                <SiteCard key={site.id} site={site} />
-              ))}
-            </div>
+          {/* Site Cards - Fixed Logic */}
+          {dashboardData && dashboardData.sites && dashboardData.sites.length > 0 ? (
+            <>
+              <div className="mb-4">
+                <h3 className="text-xl font-semibold text-gray-900">
+                  Site Status ({dashboardData.sites.length} sites)
+                </h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8">
+                {dashboardData.sites.map((site) => (
+                  <SiteCard key={site.id} site={site} />
+                ))}
+              </div>
+            </>
           ) : (
             <Card className="mb-8">
               <CardContent className="p-8 text-center">
                 <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No Site Data Available</h3>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  {dashboardData ? 'No Sites Found' : 'Loading Sites...'}
+                </h3>
                 <p className="text-gray-600 mb-4">
-                  No sensor data found. This could mean:
+                  {dashboardData 
+                    ? 'No sites are configured for your account or role.'
+                    : 'Please wait while we load your site data.'
+                  }
                 </p>
-                <ul className="text-left text-gray-600 space-y-1 mb-6 max-w-md mx-auto">
-                  <li>• Sensors are not connected or sending data</li>
-                  <li>• Device IDs don't match between sites and sensor readings</li>
-                  <li>• Database connection issues</li>
-                </ul>
                 <Button onClick={() => refetch()}>
                   <RefreshCw className="w-4 h-4 mr-2" />
-                  Retry Loading Data
+                  {dashboardData ? 'Retry Loading' : 'Refresh'}
                 </Button>
+                
+                {/* Show what we actually received */}
+                {dashboardData && (
+                  <div className="mt-4 p-4 bg-gray-100 rounded text-left">
+                    <p className="text-sm font-semibold text-gray-700">API Response Debug:</p>
+                    <pre className="text-xs text-gray-600 mt-2 overflow-auto">
+                      {JSON.stringify(dashboardData, null, 2)}
+                    </pre>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
@@ -257,7 +311,7 @@ export default function Dashboard() {
           {process.env.NODE_ENV === 'development' && debugInfo && (
             <Card className="mt-8">
               <CardHeader>
-                <CardTitle className="text-sm font-mono">Debug Information</CardTitle>
+                <CardTitle className="text-sm font-mono">Full Debug Information</CardTitle>
               </CardHeader>
               <CardContent>
                 <pre className="text-xs bg-gray-100 p-4 rounded overflow-x-auto">

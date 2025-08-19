@@ -40,10 +40,18 @@ export default function SiteCard({ site }: SiteCardProps) {
     }
   };
 
-  // Ensure we have valid numbers for display
-  const fuelLevel = Math.max(0, Math.min(100, site.fuelLevelPercentage || 0));
+  // Handle zero and undefined values properly
+  const fuelLevel = Math.max(0, Math.min(100, site.fuelLevelPercentage ?? 0));
   const fuelVolume = parseFloat(site.latestReading?.fuelVolume || '0');
   const temperature = parseFloat(site.latestReading?.temperature || '0');
+
+  // Log debug info for this site
+  console.log(`SiteCard ${site.name}:`, {
+    fuelLevelPercentage: site.fuelLevelPercentage,
+    fuelLevel: fuelLevel,
+    latestReading: site.latestReading,
+    alertStatus: site.alertStatus
+  });
 
   return (
     <Card className="bg-white hover:shadow-md transition-shadow duration-200 border border-gray-200">
@@ -86,7 +94,7 @@ export default function SiteCard({ site }: SiteCardProps) {
           <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
             <div 
               className={`h-full transition-all duration-500 ${getFuelLevelColor(fuelLevel)}`}
-              style={{ width: `${fuelLevel}%` }}
+              style={{ width: `${Math.max(2, fuelLevel)}%` }} // Show at least 2% width for visibility
             />
           </div>
           
@@ -114,12 +122,14 @@ export default function SiteCard({ site }: SiteCardProps) {
             {getAlertBadge(site.alertStatus)}
           </div>
           
-          {/* Last Updated */}
-          {site.latestReading?.capturedAt && (
-            <div className="text-xs text-gray-500 pt-2 border-t border-gray-100">
-              Last updated: {new Date(site.latestReading.capturedAt).toLocaleTimeString()}
-            </div>
-          )}
+          {/* Last Updated or No Data indicator */}
+          <div className="text-xs text-gray-500 pt-2 border-t border-gray-100">
+            {site.latestReading?.capturedAt ? (
+              `Last updated: ${new Date(site.latestReading.capturedAt).toLocaleTimeString()}`
+            ) : (
+              <span className="text-orange-600 font-medium">No sensor readings available</span>
+            )}
+          </div>
         </div>
       </CardContent>
     </Card>

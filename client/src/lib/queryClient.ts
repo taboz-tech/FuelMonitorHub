@@ -1,44 +1,33 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
+import { apiRequest } from "./api";
 
-async function throwIfResNotOk(res: Response) {
-  if (!res.ok) {
-    const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
-  }
-}
-
-export async function apiRequest(
-  method: string,
-  url: string,
-  data?: unknown | undefined,
-): Promise<Response> {
-  const res = await fetch(url, {
-    method,
-    headers: data ? { "Content-Type": "application/json" } : {},
-    body: data ? JSON.stringify(data) : undefined,
-    credentials: "include",
-  });
-
-  await throwIfResNotOk(res);
-  return res;
-}
-
-type UnauthorizedBehavior = "returnNull" | "throw";
 export const getQueryFn: <T>(options: {
-  on401: UnauthorizedBehavior;
-}) => QueryFunction<T> =
+  on401: "returnNull" | "throw";
+}) => QueryFunction<T> = 
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(queryKey.join("/") as string, {
-      credentials: "include",
-    });
-
-    if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      return null;
+    try {
+      const url = queryKey.join("");
+      console.log('Query function called for:', url);
+      
+      const res = await apiRequest("GET", url);
+      const data = await res.json();
+      
+      console.log('Query successful for:', url, data);
+      return data;
+    } catch (error) {
+      console.error('Query failed for:', queryKey.join(""), error);
+      
+      if (error.message.includes('401') || error.message.includes('authentication')) {
+        if (unauthorizedBehavior === "returnNull") {
+          return null;
+        }
+        // Let the error bubble up to trigger auth handling
+        throw error;
+      }
+      
+      throw error;
     }
-
-    await throwIfResNotOk(res);
-    return await res.json();
   };
 
 export const queryClient = new QueryClient({
@@ -47,8 +36,22 @@ export const queryClient = new QueryClient({
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
-      staleTime: Infinity,
-      retry: false,
+      staleTime: 30000, // 30 seconds
+      retry: (failureCount, error) => {
+        console.log('Query retry check:', { failureCount, error: error.message });
+        
+        // Don't retry auth errors
+        if (error.message.includes('authentication') || 
+            error.message.includes('401') || 
+            error.message.includes('403') ||
+            error.message.includes('HTML')) {
+          return false;
+        }
+        
+        // Retry up to 2 times for other errors
+        return failureCount < 2;
+      },
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
     },
     mutations: {
       retry: false,

@@ -22,45 +22,61 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [, setLocation] = useLocation();
 
-  useEffect(() => {
-    // Check for existing token on app initialization
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      // Verify token is still valid by making a test request using apiRequest
-      apiRequest('GET', '/api/dashboard')
-        .then(response => {
-          if (response.ok) {
-            // Token is valid, get user info from token
-            const payload = JSON.parse(atob(token.split('.')[1]));
-            setUser({
-              id: payload.id,
-              username: payload.username,
-              email: payload.email,
-              role: payload.role,
-              fullName: payload.fullName,
-              isActive: true,
-              lastLogin: null,
-              createdAt: new Date(),
-            });
-          } else {
-            // Token is invalid, remove it
-            localStorage.removeItem('auth_token');
-          }
-        })
-        .catch(() => {
-          // Network error or token invalid
-          localStorage.removeItem('auth_token');
-        })
-        .finally(() => {
-          setIsLoading(false);
+  const validateToken = async (token: string): Promise<boolean> => {
+    try {
+      console.log('Validating token...');
+      const response = await apiRequest('GET', '/api/dashboard');
+      
+      if (response.ok) {
+        // Token is valid, extract user info from token
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        setUser({
+          id: payload.id,
+          username: payload.username,
+          email: payload.email,
+          role: payload.role,
+          fullName: payload.fullName,
+          isActive: true,
+          lastLogin: null,
+          createdAt: new Date(),
         });
-    } else {
-      setIsLoading(false);
+        console.log('Token validated successfully');
+        return true;
+      } else {
+        console.log('Token validation failed');
+        return false;
+      }
+    } catch (error) {
+      console.error('Token validation error:', error);
+      return false;
     }
+  };
+
+  useEffect(() => {
+    const initAuth = async () => {
+      const token = localStorage.getItem('auth_token');
+      
+      if (token) {
+        console.log('Found existing token, validating...');
+        const isValid = await validateToken(token);
+        
+        if (!isValid) {
+          console.log('Token invalid, removing...');
+          localStorage.removeItem('auth_token');
+        }
+      } else {
+        console.log('No token found');
+      }
+      
+      setIsLoading(false);
+    };
+
+    initAuth();
   }, []);
 
   const login = async (username: string, password: string) => {
     try {
+      console.log('Attempting login...');
       const response = await apiRequest("POST", "/api/auth/login", {
         username,
         password,
@@ -74,6 +90,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Set user
       setUser(data.user);
       
+      console.log('Login successful');
     } catch (error) {
       console.error('Login error:', error);
       throw error;
@@ -81,6 +98,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const logout = () => {
+    console.log('Logging out...');
     localStorage.removeItem('auth_token');
     setUser(null);
     setLocation('/login');
