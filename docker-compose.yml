@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile.api
       target: production
     ports:
-      - "4172:5000"
+      - "4172:5000"  # Fixed: API on port 4172
     environment:
       NODE_ENV: production
       # SSH Tunnel Configuration
@@ -35,14 +35,14 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        REACT_APP_API_BASE_URL: http://localhost:4172
-        REACT_APP_VERSION: 1.0.0
-        GENERATE_SOURCEMAP: false
+        REACT_APP_API_BASE_URL: "http://154.119.80.28:4172"  # Fixed: Point to API server
+        REACT_APP_VERSION: "1.0.0"
+        GENERATE_SOURCEMAP: "false"
     ports:
-      - "4173:4173"
+      - "4173:4173"  # Fixed: Frontend on port 4173
     environment:
       - NODE_ENV=production
-      - REACT_APP_API_BASE_URL=http://localhost:4172
+      - REACT_APP_API_BASE_URL=http://154.119.80.28:4172
       - REACT_APP_VERSION=1.0.0
     depends_on:
       - api

@@ -2,7 +2,7 @@
 import { queryClient } from "./queryClient";
 
 // Get the API base URL from environment variable
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:4172';
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://154.119.80.28:4172';
 
 console.log('API Base URL:', API_BASE_URL); // Debug log
 

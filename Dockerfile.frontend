@@ -27,8 +27,8 @@ ENV REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL
 ENV REACT_APP_VERSION=$REACT_APP_VERSION
 ENV GENERATE_SOURCEMAP=$GENERATE_SOURCEMAP
 
-# Build the frontend (using your vite config which outputs to dist/public)
-RUN npm run build 2>/dev/null || npx vite build
+# Build ONLY the frontend (not the server)
+RUN npx vite build
 
 # Debug: List what was built
 RUN ls -la dist/
