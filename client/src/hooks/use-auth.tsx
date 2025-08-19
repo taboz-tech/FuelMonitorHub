@@ -24,31 +24,60 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const validateToken = async (token: string): Promise<boolean> => {
     try {
-      console.log('Validating token...');
-      const response = await apiRequest('GET', '/api/dashboard');
+      console.log('🔍 Validating token...');
+      
+      // Call the auth validation endpoint
+      const response = await apiRequest('GET', '/api/auth/validate');
       
       if (response.ok) {
-        // Token is valid, extract user info from token
-        const payload = JSON.parse(atob(token.split('.')[1]));
-        setUser({
-          id: payload.id,
-          username: payload.username,
-          email: payload.email,
-          role: payload.role,
-          fullName: payload.fullName,
-          isActive: true,
-          lastLogin: null,
-          createdAt: new Date(),
-        });
-        console.log('Token validated successfully');
-        return true;
-      } else {
-        console.log('Token validation failed');
-        return false;
+        const data = await response.json();
+        if (data.valid && data.user) {
+          setUser(data.user);
+          console.log('✅ Token validated successfully for user:', data.user.username);
+          return true;
+        }
       }
-    } catch (error) {
-      console.error('Token validation error:', error);
+      
+      console.log('❌ Token validation failed - invalid response');
       return false;
+    } catch (error) {
+      console.error('❌ Token validation error:', error);
+      return false;
+    }
+  };
+
+  const parseTokenPayload = (token: string) => {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      const now = Math.floor(Date.now() / 1000);
+      
+      console.log('📋 Token info:', {
+        issuedAt: new Date(payload.iat * 1000),
+        expiresAt: new Date(payload.exp * 1000),
+        currentTime: new Date(now * 1000),
+        isExpired: payload.exp < now,
+        user: payload.username
+      });
+      
+      // Check if token is expired
+      if (payload.exp < now) {
+        console.log('⏰ Token has expired');
+        return null;
+      }
+      
+      return {
+        id: payload.id,
+        username: payload.username,
+        email: payload.email,
+        role: payload.role,
+        fullName: payload.fullName,
+        isActive: true,
+        lastLogin: null,
+        createdAt: new Date(),
+      };
+    } catch (error) {
+      console.error('❌ Error parsing token:', error);
+      return null;
     }
   };
 
@@ -57,15 +86,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const token = localStorage.getItem('auth_token');
       
       if (token) {
-        console.log('Found existing token, validating...');
+        console.log('🔑 Found existing token, checking validity...');
+        
+        // First check if token is expired locally
+        const userData = parseTokenPayload(token);
+        if (!userData) {
+          console.log('🗑️ Token expired or invalid, removing...');
+          localStorage.removeItem('auth_token');
+          setIsLoading(false);
+          return;
+        }
+        
+        // Token looks valid, now validate with server
         const isValid = await validateToken(token);
         
         if (!isValid) {
-          console.log('Token invalid, removing...');
+          console.log('🗑️ Server rejected token, removing...');
           localStorage.removeItem('auth_token');
+          setUser(null);
+        } else {
+          // Token is valid and user is already set by validateToken
+          console.log('✅ Authentication restored from stored token');
         }
       } else {
-        console.log('No token found');
+        console.log('🔍 No token found in localStorage');
       }
       
       setIsLoading(false);
@@ -76,11 +120,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const login = async (username: string, password: string) => {
     try {
-      console.log('Attempting login...');
+      console.log('🔐 Attempting login for user:', username);
       const response = await apiRequest("POST", "/api/auth/login", {
         username,
         password,
       });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Login failed' }));
+        throw new Error(errorData.message || 'Login failed');
+      }
       
       const data: AuthResponse = await response.json();
       
@@ -90,15 +139,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Set user
       setUser(data.user);
       
-      console.log('Login successful');
+      console.log('✅ Login successful for user:', data.user.username);
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('❌ Login error:', error);
       throw error;
     }
   };
 
   const logout = () => {
-    console.log('Logging out...');
+    console.log('🚪 Logging out...');
     localStorage.removeItem('auth_token');
     setUser(null);
     setLocation('/login');

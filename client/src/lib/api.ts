@@ -1,44 +1,11 @@
-// Replace your client/src/lib/api.ts with this:
-
 import { queryClient } from "./queryClient";
 
 // Get the API base URL from environment variable
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://154.119.80.28:4172';
 
-console.log('API Base URL:', API_BASE_URL); // Debug log
+console.log('API Base URL:', API_BASE_URL);
 
 let isRefreshing = false;
-let refreshPromise: Promise<string> | null = null;
-
-async function refreshToken(): Promise<string> {
-  if (isRefreshing && refreshPromise) {
-    return refreshPromise;
-  }
-
-  isRefreshing = true;
-  refreshPromise = new Promise(async (resolve, reject) => {
-    try {
-      const token = localStorage.getItem('auth_token');
-      if (!token) {
-        throw new Error('No token to refresh');
-      }
-
-      // Try to refresh the token or re-authenticate
-      // For now, we'll just redirect to login if token fails
-      throw new Error('Token refresh needed');
-    } catch (error) {
-      // Clear invalid token and redirect to login
-      localStorage.removeItem('auth_token');
-      window.location.href = '/login';
-      reject(error);
-    } finally {
-      isRefreshing = false;
-      refreshPromise = null;
-    }
-  });
-
-  return refreshPromise;
-}
 
 export async function apiRequest(
   method: string,
@@ -60,7 +27,7 @@ export async function apiRequest(
   // Construct full URL
   const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
   
-  console.log(`Making API request to: ${fullUrl}`); // Debug log
+  console.log(`🌐 API Request: ${method} ${fullUrl}`);
 
   try {
     const res = await fetch(fullUrl, {
@@ -75,30 +42,44 @@ export async function apiRequest(
     const isHtml = contentType?.includes('text/html');
     
     if (isHtml) {
-      console.error('Received HTML instead of JSON - likely authentication issue');
-      // Clear token and redirect to login
-      localStorage.removeItem('auth_token');
-      window.location.href = '/login';
-      throw new Error('Authentication required - redirecting to login');
+      console.error('🚨 Received HTML instead of JSON - likely authentication issue');
+      console.error('Response status:', res.status);
+      console.error('Response headers:', Object.fromEntries(res.headers.entries()));
+      
+      // For auth endpoints, don't clear token immediately
+      if (!url.includes('/auth/')) {
+        localStorage.removeItem('auth_token');
+        window.location.href = '/login';
+      }
+      throw new Error('Server returned HTML instead of JSON');
     }
+
+    // Log response details for debugging
+    console.log(`📊 API Response: ${res.status} ${res.statusText}`);
 
     if (!res.ok) {
       // Handle different error cases
       if (res.status === 401 || res.status === 403) {
-        console.log('Authentication failed, clearing token');
-        localStorage.removeItem('auth_token');
-        window.location.href = '/login';
+        console.log('🔒 Authentication failed, status:', res.status);
+        
+        // Only clear token and redirect for non-auth endpoints
+        if (!url.includes('/auth/')) {
+          localStorage.removeItem('auth_token');
+          window.location.href = '/login';
+        }
         throw new Error(`Authentication failed: ${res.status}`);
       }
       
       let errorMessage;
       try {
+        const errorData = await res.json();
+        errorMessage = errorData.message || res.statusText;
+      } catch (e) {
         const errorText = await res.text();
         errorMessage = errorText || res.statusText;
-      } catch (e) {
-        errorMessage = res.statusText;
       }
       
+      console.error(`❌ API Error: ${res.status} - ${errorMessage}`);
       throw new Error(`${res.status}: ${errorMessage}`);
     }
 
@@ -111,6 +92,8 @@ export async function apiRequest(
     // Try to parse JSON
     try {
       const jsonData = JSON.parse(responseText);
+      console.log(`✅ API Success: ${method} ${url.split('?')[0]}`);
+      
       // Return a Response-like object with the parsed data
       return {
         ok: true,
@@ -121,25 +104,31 @@ export async function apiRequest(
         text: async () => responseText,
       } as Response;
     } catch (parseError) {
-      console.error('JSON parse error:', parseError);
-      console.error('Response text:', responseText.substring(0, 200));
+      console.error('❌ JSON parse error:', parseError);
+      console.error('Response preview:', responseText.substring(0, 200));
       
-      // If it looks like HTML, redirect to login
+      // If it looks like HTML, it's likely an auth redirect
       if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
-        localStorage.removeItem('auth_token');
-        window.location.href = '/login';
-        throw new Error('Received HTML instead of JSON - authentication required');
+        if (!url.includes('/auth/')) {
+          localStorage.removeItem('auth_token');
+          window.location.href = '/login';
+        }
+        throw new Error('Received HTML instead of JSON');
       }
       
       throw new Error(`Invalid JSON response: ${parseError.message}`);
     }
 
   } catch (error) {
-    console.error(`API request failed (attempt ${retryCount + 1}):`, error);
+    console.error(`❌ API request failed (attempt ${retryCount + 1}):`, error);
     
     // Retry logic for network errors (not auth errors)
-    if (retryCount < 2 && !error.message.includes('authentication') && !error.message.includes('HTML')) {
-      console.log(`Retrying request (${retryCount + 1}/2)...`);
+    if (retryCount < 2 && 
+        !error.message.includes('authentication') && 
+        !error.message.includes('HTML') &&
+        !error.message.includes('401') &&
+        !error.message.includes('403')) {
+      console.log(`🔄 Retrying request (${retryCount + 1}/2)...`);
       await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
       return apiRequest(method, url, data, retryCount + 1);
     }

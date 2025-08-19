@@ -13,41 +13,84 @@ import { RefreshCw, TrendingUp, AlertCircle, CheckCircle, Zap } from "lucide-rea
 import { type DashboardData } from "@shared/schema";
 
 export default function Dashboard() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const [debugInfo, setDebugInfo] = useState<any>(null);
 
+  // Debug logging for auth states
+  console.log("🔍 Dashboard render state:", {
+    authLoading,
+    isAuthenticated,
+    hasUser: !!user,
+    username: user?.username
+  });
+
+  // Wait for auth to complete before redirecting
   useEffect(() => {
-    if (!isAuthenticated) {
+    // Only redirect if auth is not loading and user is not authenticated
+    if (!authLoading && !isAuthenticated) {
+      console.log("🚪 Redirecting to login - auth completed, user not authenticated");
       setLocation("/login");
     }
-  }, [isAuthenticated, setLocation]);
+  }, [authLoading, isAuthenticated, setLocation]);
 
-  const { data: dashboardData, isLoading, refetch, error } = useQuery<DashboardData & { viewMode: string }>({
+  // Dashboard data query - only run when authenticated
+  const { data: dashboardData, isLoading: dashboardLoading, refetch, error } = useQuery<DashboardData & { viewMode: string }>({
     queryKey: ["/api/dashboard"],
-    enabled: isAuthenticated,
+    enabled: !authLoading && isAuthenticated, // Wait for auth AND ensure user is authenticated
     refetchInterval: 30000, // Refresh every 30 seconds
     onSuccess: (data) => {
-      console.log("Dashboard data received:", data);
+      console.log("✅ Dashboard data received:", data);
       console.log("Sites array:", data?.sites);
       console.log("Sites length:", data?.sites?.length);
       setDebugInfo(data);
     },
     onError: (error) => {
-      console.error("Dashboard query error:", error);
+      console.error("❌ Dashboard query error:", error);
     }
   });
 
-  // Add debugging logs
-  console.log("Dashboard render - dashboardData:", dashboardData);
-  console.log("Dashboard render - isLoading:", isLoading);
-  console.log("Dashboard render - error:", error);
+  // Show loading spinner while auth is loading
+  if (authLoading) {
+    console.log("⏳ Auth still loading, showing auth spinner");
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <h2 className="text-lg font-semibold text-gray-700">Checking authentication...</h2>
+          <p className="text-gray-500">Please wait</p>
+        </div>
+      </div>
+    );
+  }
 
-  if (!isAuthenticated || !user) {
+  // If auth completed but user is not authenticated, show nothing (redirect will happen)
+  if (!authLoading && !isAuthenticated) {
+    console.log("🚫 Auth completed, user not authenticated - should redirect");
     return null;
   }
 
-  if (isLoading) {
+  // If user is not available yet, show error
+  if (!user) {
+    console.log("❌ Authenticated but no user object");
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Card className="max-w-md">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">Authentication Error</h2>
+            <p className="text-gray-600 mb-4">User information not available</p>
+            <Button onClick={() => window.location.reload()}>
+              Reload Page
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Show dashboard loading while dashboard data loads
+  if (dashboardLoading) {
     return (
       <div className="min-h-screen bg-gray-50">
         <Header />
@@ -55,8 +98,16 @@ export default function Dashboard() {
           <Sidebar />
           <main className="flex-1 p-6">
             <div className="animate-pulse space-y-6">
-              <div className="h-8 bg-gray-200 rounded w-1/4"></div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="h-8 bg-gray-200 rounded w-1/4"></div>
+                <div className="h-10 bg-gray-200 rounded w-32"></div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="h-32 bg-gray-200 rounded-xl"></div>
+                ))}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {[1, 2, 3, 4].map((i) => (
                   <div key={i} className="h-48 bg-gray-200 rounded-xl"></div>
                 ))}
@@ -68,6 +119,7 @@ export default function Dashboard() {
     );
   }
 
+  // Show error state
   if (error) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -99,16 +151,14 @@ export default function Dashboard() {
     );
   }
 
-  // Enhanced data checking
+  // Main dashboard render
   const hasData = dashboardData && dashboardData.sites && Array.isArray(dashboardData.sites) && dashboardData.sites.length > 0;
   
-  // Debug logging
-  console.log("hasData evaluation:", {
-    dashboardData: !!dashboardData,
-    sites: !!dashboardData?.sites,
-    isArray: Array.isArray(dashboardData?.sites),
-    length: dashboardData?.sites?.length,
-    hasData: hasData
+  console.log("📊 Dashboard final render:", {
+    hasData,
+    sitesCount: dashboardData?.sites?.length,
+    viewMode: dashboardData?.viewMode,
+    user: user?.username
   });
 
   return (
@@ -124,6 +174,9 @@ export default function Dashboard() {
                 <h2 className="text-3xl font-bold text-gray-900">Dashboard Overview</h2>
                 <div className="flex items-center mt-2 space-x-4">
                   <p className="text-gray-600">
+                    Welcome back, {user.fullName} ({user.role})
+                  </p>
+                  <p className="text-gray-500">
                     {dashboardData?.viewMode === 'realtime' 
                       ? 'Showing real-time sensor data' 
                       : 'Showing daily closing readings'}
@@ -139,9 +192,9 @@ export default function Dashboard() {
                 <Button 
                   onClick={() => refetch()}
                   className="flex items-center px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition duration-200"
-                  disabled={isLoading}
+                  disabled={dashboardLoading}
                 >
-                  <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                  <RefreshCw className={`w-4 h-4 mr-2 ${dashboardLoading ? 'animate-spin' : ''}`} />
                   Refresh Data
                 </Button>
               </div>
@@ -149,20 +202,18 @@ export default function Dashboard() {
           </div>
 
           {/* DEBUG INFO - Always show in development */}
-          {(process.env.NODE_ENV === 'development' || !hasData) && (
-            <Card className="mb-4 bg-yellow-50 border-yellow-200">
+          {process.env.NODE_ENV === 'development' && (
+            <Card className="mb-4 bg-blue-50 border-blue-200">
               <CardContent className="p-4">
-                <h4 className="font-semibold mb-2 text-yellow-800">Debug Info:</h4>
+                <h4 className="font-semibold mb-2 text-blue-800">Debug Info:</h4>
                 <div className="text-sm space-y-1">
-                  <p>dashboardData exists: <span className="font-mono">{dashboardData ? 'YES' : 'NO'}</span></p>
-                  <p>sites property exists: <span className="font-mono">{dashboardData?.sites ? 'YES' : 'NO'}</span></p>
-                  <p>sites is array: <span className="font-mono">{Array.isArray(dashboardData?.sites) ? 'YES' : 'NO'}</span></p>
-                  <p>sites count: <span className="font-mono">{dashboardData?.sites?.length || 0}</span></p>
-                  <p>hasData result: <span className="font-mono">{hasData ? 'TRUE' : 'FALSE'}</span></p>
-                  <p>viewMode: <span className="font-mono">{dashboardData?.viewMode || 'undefined'}</span></p>
-                  {dashboardData?.sites && (
-                    <p>first site: <span className="font-mono">{dashboardData.sites[0]?.name || 'no name'}</span></p>
-                  )}
+                  <p>Auth Loading: <span className="font-mono">{authLoading ? 'YES' : 'NO'}</span></p>
+                  <p>Is Authenticated: <span className="font-mono">{isAuthenticated ? 'YES' : 'NO'}</span></p>
+                  <p>User: <span className="font-mono">{user?.username || 'None'}</span></p>
+                  <p>Dashboard Loading: <span className="font-mono">{dashboardLoading ? 'YES' : 'NO'}</span></p>
+                  <p>Dashboard Data: <span className="font-mono">{dashboardData ? 'YES' : 'NO'}</span></p>
+                  <p>Sites Count: <span className="font-mono">{dashboardData?.sites?.length || 0}</span></p>
+                  <p>View Mode: <span className="font-mono">{dashboardData?.viewMode || 'undefined'}</span></p>
                 </div>
               </CardContent>
             </Card>
@@ -223,8 +274,8 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* Site Cards - Fixed Logic */}
-          {dashboardData && dashboardData.sites && dashboardData.sites.length > 0 ? (
+          {/* Site Cards */}
+          {hasData ? (
             <>
               <div className="mb-4">
                 <h3 className="text-xl font-semibold text-gray-900">
@@ -242,28 +293,15 @@ export default function Dashboard() {
               <CardContent className="p-8 text-center">
                 <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  {dashboardData ? 'No Sites Found' : 'Loading Sites...'}
+                  No Sites Found
                 </h3>
                 <p className="text-gray-600 mb-4">
-                  {dashboardData 
-                    ? 'No sites are configured for your account or role.'
-                    : 'Please wait while we load your site data.'
-                  }
+                  No sites are configured for your account or role.
                 </p>
                 <Button onClick={() => refetch()}>
                   <RefreshCw className="w-4 h-4 mr-2" />
-                  {dashboardData ? 'Retry Loading' : 'Refresh'}
+                  Retry Loading
                 </Button>
-                
-                {/* Show what we actually received */}
-                {dashboardData && (
-                  <div className="mt-4 p-4 bg-gray-100 rounded text-left">
-                    <p className="text-sm font-semibold text-gray-700">API Response Debug:</p>
-                    <pre className="text-xs text-gray-600 mt-2 overflow-auto">
-                      {JSON.stringify(dashboardData, null, 2)}
-                    </pre>
-                  </div>
-                )}
               </CardContent>
             </Card>
           )}

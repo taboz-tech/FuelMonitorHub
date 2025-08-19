@@ -43,9 +43,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ status: "healthy", timestamp: new Date().toISOString() });
   });
 
-  // Authentication endpoints
+  // Token validation endpoint for session persistence
+  app.get("/api/auth/validate", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      // If we get here, the token is valid (authenticateToken middleware passed)
+      const user = req.user!;
+      
+      console.log(`✅ Token validation successful for user: ${user.username}`);
+      
+      res.json({ 
+        valid: true, 
+        user: user,
+        timestamp: new Date().toISOString(),
+        tokenInfo: {
+          userId: user.id,
+          username: user.username,
+          role: user.role
+        }
+      });
+    } catch (error) {
+      console.error("❌ Token validation error:", error);
+      res.status(401).json({ 
+        valid: false, 
+        message: "Invalid token",
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+
+  // Enhanced login with better error handling
   app.post("/api/auth/login", async (req, res) => {
     try {
+      console.log("🔐 Login attempt received");
       const { username, password } = loginSchema.parse(req.body);
       
       // Ensure database is connected with retry logic
@@ -61,23 +90,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } catch (error) {
           console.error(`Database connection attempt failed, ${retries} retries left:`, error);
           retries--;
-          if (retries === 0) throw error;
+          if (retries === 0) {
+            console.error("❌ Database connection failed completely");
+            return res.status(500).json({ message: "Database connection failed" });
+          }
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
 
+      console.log(`🔍 Looking up user: ${username}`);
       const user = await db
         .select()
         .from(users)
         .where(eq(users.username, username))
         .limit(1);
 
-      if (!user.length || !user[0].isActive) {
+      if (!user.length) {
+        console.log(`❌ User not found: ${username}`);
         return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      if (!user[0].isActive) {
+        console.log(`❌ User inactive: ${username}`);
+        return res.status(401).json({ message: "Account is inactive" });
       }
 
       const isValidPassword = await comparePassword(password, user[0].password);
       if (!isValidPassword) {
+        console.log(`❌ Invalid password for user: ${username}`);
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
@@ -90,6 +130,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { password: _, ...userWithoutPassword } = user[0];
       const token = generateToken(userWithoutPassword);
 
+      console.log(`✅ Login successful for user: ${username}, role: ${user[0].role}`);
+
       const response: AuthResponse = {
         user: userWithoutPassword,
         token
@@ -97,10 +139,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json(response);
     } catch (error) {
-      console.error("Login error:", error);
-      res.status(400).json({ message: "Invalid request" });
+      console.error("❌ Login error:", error);
+      
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ message: "Invalid request format" });
+      }
+      
+      res.status(500).json({ message: "Internal server error" });
     }
   });
+
 
   app.post("/api/auth/logout", authenticateToken, (req, res) => {
     res.json({ message: "Logged out successfully" });
