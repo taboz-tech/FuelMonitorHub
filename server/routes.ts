@@ -28,6 +28,7 @@ import {
   type AuthResponse
 } from "@shared/schema";
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
+import { ne } from "drizzle-orm";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize database connection and scheduler
@@ -178,10 +179,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Enhanced User management endpoints (admin only)
+  app.get("/api/users", authenticateToken, requireAdmin, async (req, res) => {
+    try {
+      const db = getDb();
+      const allUsers = await db
+        .select({
+          id: users.id,
+          username: users.username,
+          email: users.email,
+          role: users.role,
+          fullName: users.fullName,
+          isActive: users.isActive,
+          lastLogin: users.lastLogin,
+          createdAt: users.createdAt,
+        })
+        .from(users)
+        .orderBy(users.createdAt);
+
+      console.log(`📋 Retrieved ${allUsers.length} users`);
+      res.json(allUsers);
+    } catch (error) {
+      console.error("Get users error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.post("/api/users", authenticateToken, requireAdmin, async (req, res) => {
     try {
-      const userData = insertUserSchema.parse(req.body);
+      // Create a validation schema that makes password required for new users
+      const createUserSchema = insertUserSchema.extend({
+        password: z.string().min(6, "Password must be at least 6 characters")
+      });
+      
+      const userData = createUserSchema.parse(req.body);
       const db = getDb();
+
+      // Check if username already exists
+      const existingUsername = await db
+        .select()
+        .from(users)
+        .where(eq(users.username, userData.username))
+        .limit(1);
+
+      if (existingUsername.length > 0) {
+        return res.status(400).json({ message: "Username already exists" });
+      }
+
+      // Check if email already exists
+      const existingEmail = await db
+        .select()
+        .from(users)
+        .where(eq(users.email, userData.email))
+        .limit(1);
+
+      if (existingEmail.length > 0) {
+        return res.status(400).json({ message: "Email already exists" });
+      }
 
       const hashedPassword = await hashPassword(userData.password);
       
@@ -198,15 +252,192 @@ export async function registerRoutes(app: Express): Promise<Server> {
           role: users.role,
           fullName: users.fullName,
           isActive: users.isActive,
+          lastLogin: users.lastLogin,
           createdAt: users.createdAt,
         });
 
-      res.json(newUser[0]);
+      console.log(`✅ User created: ${newUser[0].username} (${newUser[0].role})`);
+      res.status(201).json(newUser[0]);
     } catch (error) {
       console.error("Create user error:", error);
-      res.status(400).json({ message: "Failed to create user" });
+      
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ 
+          message: "Invalid data provided",
+          details: error.errors 
+        });
+      }
+      
+      res.status(500).json({ message: "Failed to create user" });
     }
   });
+
+  app.put("/api/users/:id", authenticateToken, requireAdmin, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: "Invalid user ID" });
+      }
+
+      // Create a validation schema for updates (password optional)
+      const updateUserSchema = insertUserSchema.extend({
+        password: z.string().min(6, "Password must be at least 6 characters").optional()
+      }).omit({ username: true }); // Username can't be changed
+      
+      const userData = updateUserSchema.parse(req.body);
+      const db = getDb();
+
+      // Check if user exists
+      const existingUser = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      if (existingUser.length === 0) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Check if email already exists (excluding current user)
+      if (userData.email) {
+        const existingEmail = await db
+          .select()
+          .from(users)
+          .where(and(eq(users.email, userData.email), ne(users.id, userId)))
+          .limit(1);
+
+        if (existingEmail.length > 0) {
+          return res.status(400).json({ message: "Email already exists" });
+        }
+      }
+
+      // Prepare update data
+      const updateData: any = {
+        email: userData.email,
+        role: userData.role,
+        fullName: userData.fullName,
+        isActive: userData.isActive,
+      };
+
+      // Hash password if provided
+      if (userData.password && userData.password.trim() !== '') {
+        updateData.password = await hashPassword(userData.password);
+      }
+
+      const updatedUser = await db
+        .update(users)
+        .set(updateData)
+        .where(eq(users.id, userId))
+        .returning({
+          id: users.id,
+          username: users.username,
+          email: users.email,
+          role: users.role,
+          fullName: users.fullName,
+          isActive: users.isActive,
+          lastLogin: users.lastLogin,
+          createdAt: users.createdAt,
+        });
+
+      console.log(`✅ User updated: ${updatedUser[0].username}`);
+      res.json(updatedUser[0]);
+    } catch (error) {
+      console.error("Update user error:", error);
+      
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ 
+          message: "Invalid data provided",
+          details: error.errors 
+        });
+      }
+      
+      res.status(500).json({ message: "Failed to update user" });
+    }
+  });
+
+  app.delete("/api/users/:id", authenticateToken, requireAdmin, async (req: AuthRequest, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: "Invalid user ID" });
+      }
+
+      const db = getDb();
+      const currentUser = req.user!;
+
+      // Prevent self-deletion
+      if (userId === currentUser.id) {
+        return res.status(400).json({ message: "Cannot delete your own account" });
+      }
+
+      // Check if user exists
+      const existingUser = await db
+        .select()
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      if (existingUser.length === 0) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      // Delete related records first (cascade delete)
+      await db
+        .delete(userSiteAssignments)
+        .where(eq(userSiteAssignments.userId, userId));
+
+      await db
+        .delete(adminPreferences)
+        .where(eq(adminPreferences.userId, userId));
+
+      // Delete the user
+      await db
+        .delete(users)
+        .where(eq(users.id, userId));
+
+      console.log(`🗑️ User deleted: ${existingUser[0].username}`);
+      res.json({ message: "User deleted successfully" });
+    } catch (error) {
+      console.error("Delete user error:", error);
+      res.status(500).json({ message: "Failed to delete user" });
+    }
+  });
+
+  // Get user by ID (admin only)
+  app.get("/api/users/:id", authenticateToken, requireAdmin, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.id);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: "Invalid user ID" });
+      }
+
+      const db = getDb();
+      const user = await db
+        .select({
+          id: users.id,
+          username: users.username,
+          email: users.email,
+          role: users.role,
+          fullName: users.fullName,
+          isActive: users.isActive,
+          lastLogin: users.lastLogin,
+          createdAt: users.createdAt,
+        })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      if (user.length === 0) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      res.json(user[0]);
+    } catch (error) {
+      console.error("Get user error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
 
   // Sites endpoints
   app.get("/api/sites", authenticateToken, async (req: AuthRequest, res) => {

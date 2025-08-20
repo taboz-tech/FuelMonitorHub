@@ -150,3 +150,26 @@ export type DashboardData = {
     status: string;
   }>;
 };
+
+// Enhanced user schemas for better validation
+export const createUserSchema = z.object({
+  username: z.string().min(3, "Username must be at least 3 characters"),
+  email: z.string().email("Please enter a valid email address"),
+  fullName: z.string().min(2, "Full name must be at least 2 characters"),
+  role: z.enum(["admin", "supervisor", "manager"]),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+  isActive: z.boolean().default(true),
+});
+
+export const updateUserSchema = z.object({
+  email: z.string().email("Please enter a valid email address"),
+  fullName: z.string().min(2, "Full name must be at least 2 characters"),
+  role: z.enum(["admin", "supervisor", "manager"]),
+  password: z.string().min(6, "Password must be at least 6 characters").optional(),
+  isActive: z.boolean(),
+});
+
+// Export types for the forms
+export type CreateUserRequest = z.infer<typeof createUserSchema>;
+export type UpdateUserRequest = z.infer<typeof updateUserSchema>;
+
