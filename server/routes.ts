@@ -28,8 +28,12 @@ import {
   type SiteWithReadings,
   type AuthResponse
 } from "@shared/schema";
+<<<<<<< HEAD
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import { ne } from "drizzle-orm";
+=======
+import { eq, desc, and, inArray, sql, gte } from "drizzle-orm";
+>>>>>>> dashboard-24h-limit
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize database connection and scheduler
@@ -597,8 +601,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Only consider readings from the last 24 hours
-      const now = new Date();
-      const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const now = new Date();
+  const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const { gte } = require("drizzle-orm");
 
       const sitesWithReadings: SiteWithReadings[] = [];
       for (const site of userSites) {
@@ -611,7 +616,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .where(
               and(
                 eq(sensorReadings.deviceId, site.deviceId),
-                sensorReadings.time.gte(last24h)
+                gte(sensorReadings.time, last24h)
               )
             )
             .orderBy(desc(sensorReadings.time))
@@ -644,7 +649,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .where(
               and(
                 eq(dailyClosingReadings.siteId, site.id),
-                dailyClosingReadings.capturedAt.gte(last24h)
+                gte(dailyClosingReadings.capturedAt, last24h)
               )
             )
             .orderBy(desc(dailyClosingReadings.capturedAt))
