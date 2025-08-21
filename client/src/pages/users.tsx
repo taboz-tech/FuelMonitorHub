@@ -1,4 +1,3 @@
-// client/src/pages/users.tsx
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -7,14 +6,14 @@ import { apiRequest } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
 import Header from "@/components/layout/header";
 import Sidebar from "@/components/layout/sidebar";
-import UserDialog from "@/components/users/user-dialog"; // You'll create this
-import DeleteUserDialog from "@/components/users/delete-user-dialog"; // You'll create this
+import UserDialog from "@/components/users/user-dialog";
+import DeleteUserDialog from "@/components/users/delete-user-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
-import { Plus, Edit, Trash2, Search, Users2, Filter } from "lucide-react";
+import { Plus, Edit, Trash2, Search, Users2, Filter, MapPin } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type User } from "@shared/schema";
 
@@ -48,14 +47,26 @@ export default function Users() {
   // Create user mutation
   const createUserMutation = useMutation({
     mutationFn: async (userData: any) => {
-      const response = await apiRequest("POST", "/api/users", userData);
-      return response.json();
+      console.log('Creating user with data:', userData);
+      const { siteIds, ...userDataWithoutSites } = userData;
+      
+      // First create the user
+      const response = await apiRequest("POST", "/api/users", userDataWithoutSites);
+      const newUser = await response.json();
+      
+      // Then assign sites if needed and not admin
+      if (userData.role !== 'admin' && siteIds && siteIds.length > 0) {
+        console.log('Assigning sites to new user:', siteIds);
+        await apiRequest("POST", `/api/users/${newUser.id}/sites`, { siteIds });
+      }
+      
+      return newUser;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
       toast({
         title: "Success",
-        description: "User created successfully",
+        description: "User created successfully with site assignments",
       });
     },
     onError: (error: any) => {
@@ -71,14 +82,26 @@ export default function Users() {
   // Update user mutation
   const updateUserMutation = useMutation({
     mutationFn: async ({ id, userData }: { id: number; userData: any }) => {
-      const response = await apiRequest("PUT", `/api/users/${id}`, userData);
-      return response.json();
+      console.log('Updating user with data:', userData);
+      const { siteIds, ...userDataWithoutSites } = userData;
+      
+      // First update the user
+      const response = await apiRequest("PUT", `/api/users/${id}`, userDataWithoutSites);
+      const updatedUser = await response.json();
+      
+      // Then update site assignments if needed and not admin
+      if (userData.role !== 'admin' && siteIds !== undefined) {
+        console.log('Updating site assignments:', siteIds);
+        await apiRequest("POST", `/api/users/${id}/sites`, { siteIds });
+      }
+      
+      return updatedUser;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
       toast({
         title: "Success",
-        description: "User updated successfully",
+        description: "User updated successfully with site assignments",
       });
     },
     onError: (error: any) => {
@@ -257,7 +280,7 @@ export default function Users() {
                   <Users2 className="h-7 w-7 text-primary" />
                   User Management
                 </h2>
-                <p className="text-gray-600 mt-1">Manage user accounts and permissions</p>
+                <p className="text-gray-600 mt-1">Manage user accounts, roles, and site assignments</p>
               </div>
               <Button 
                 onClick={handleAddUser}
@@ -382,7 +405,7 @@ export default function Users() {
                         Role
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        Assigned Sites
+                        Site Access
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                         Last Login
@@ -419,9 +442,17 @@ export default function Users() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                           {userItem.role === 'admin' ? (
-                            <span className="text-blue-600 font-medium">All Sites</span>
+                            <div className="flex items-center text-blue-600">
+                              <MapPin className="w-4 h-4 mr-1" />
+                              <span className="font-medium">All Sites</span>
+                            </div>
                           ) : (
-                            <span className="text-gray-500">Site assignments</span>
+                            <div className="flex items-center text-gray-600">
+                              <MapPin className="w-4 h-4 mr-1" />
+                              <span>
+                                {userItem.role === 'manager' ? 'Assigned Site' : 'Multiple Sites'}
+                              </span>
+                            </div>
                           )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">

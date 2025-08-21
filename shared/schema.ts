@@ -172,4 +172,3 @@ export const updateUserSchema = z.object({
 // Export types for the forms
 export type CreateUserRequest = z.infer<typeof createUserSchema>;
 export type UpdateUserRequest = z.infer<typeof updateUserSchema>;
-

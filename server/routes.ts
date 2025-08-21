@@ -11,6 +11,7 @@ import {
   hashPassword,
   type AuthRequest 
 } from "./auth";
+import { z } from "zod";
 import { 
   users, 
   sites, 
@@ -47,9 +48,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Token validation endpoint for session persistence
   app.get("/api/auth/validate", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      // If we get here, the token is valid (authenticateToken middleware passed)
       const user = req.user!;
-      
       console.log(`✅ Token validation successful for user: ${user.username}`);
       
       res.json({ 
@@ -83,9 +82,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let retries = 3;
       while (retries > 0) {
         try {
-          if (!dbConnection.db) {
-            await dbConnection.connect();
-          }
           db = getDb();
           break;
         } catch (error) {
@@ -150,36 +146,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-
   app.post("/api/auth/logout", authenticateToken, (req, res) => {
     res.json({ message: "Logged out successfully" });
   });
 
-  // User management endpoints (admin only)
-  app.get("/api/users", authenticateToken, requireAdmin, async (req, res) => {
-    try {
-      const db = getDb();
-      const allUsers = await db
-        .select({
-          id: users.id,
-          username: users.username,
-          email: users.email,
-          role: users.role,
-          fullName: users.fullName,
-          isActive: users.isActive,
-          lastLogin: users.lastLogin,
-          createdAt: users.createdAt,
-        })
-        .from(users);
+  // ===== USER MANAGEMENT ENDPOINTS (ADMIN ONLY) =====
 
-      res.json(allUsers);
-    } catch (error) {
-      console.error("Get users error:", error);
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  // Enhanced User management endpoints (admin only)
+  // Get all users
   app.get("/api/users", authenticateToken, requireAdmin, async (req, res) => {
     try {
       const db = getDb();
@@ -205,6 +178,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Create new user
   app.post("/api/users", authenticateToken, requireAdmin, async (req, res) => {
     try {
       // Create a validation schema that makes password required for new users
@@ -272,6 +246,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update user
   app.put("/api/users/:id", authenticateToken, requireAdmin, async (req, res) => {
     try {
       const userId = parseInt(req.params.id);
@@ -355,6 +330,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Delete user
   app.delete("/api/users/:id", authenticateToken, requireAdmin, async (req: AuthRequest, res) => {
     try {
       const userId = parseInt(req.params.id);
@@ -438,8 +414,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ===== SITE MANAGEMENT AND USER-SITE ASSIGNMENTS =====
 
-  // Sites endpoints
+  // Get all sites
   app.get("/api/sites", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const db = getDb();
@@ -480,7 +457,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Dashboard data endpoint
+  // Assign user to sites
+  app.post("/api/users/:userId/sites", authenticateToken, requireAdmin, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      const { siteIds } = req.body; // Array of site IDs
+      
+      if (isNaN(userId) || !Array.isArray(siteIds)) {
+        return res.status(400).json({ message: "Invalid user ID or site IDs" });
+      }
+
+      const db = getDb();
+
+      // First, remove existing assignments
+      await db
+        .delete(userSiteAssignments)
+        .where(eq(userSiteAssignments.userId, userId));
+
+      // Add new assignments
+      if (siteIds.length > 0) {
+        const assignments = siteIds.map(siteId => ({
+          userId,
+          siteId: parseInt(siteId)
+        }));
+
+        await db.insert(userSiteAssignments).values(assignments);
+      }
+
+      console.log(`✅ Updated site assignments for user ${userId}: ${siteIds.length} sites`);
+      res.json({ message: "Site assignments updated successfully" });
+    } catch (error) {
+      console.error("Update site assignments error:", error);
+      res.status(500).json({ message: "Failed to update site assignments" });
+    }
+  });
+
+  // Get user's site assignments
+  app.get("/api/users/:userId/sites", authenticateToken, requireAdmin, async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+      if (isNaN(userId)) {
+        return res.status(400).json({ message: "Invalid user ID" });
+      }
+
+      const db = getDb();
+      const assignments = await db
+        .select({
+          siteId: userSiteAssignments.siteId,
+          siteName: sites.name,
+          siteLocation: sites.location,
+        })
+        .from(userSiteAssignments)
+        .innerJoin(sites, eq(sites.id, userSiteAssignments.siteId))
+        .where(eq(userSiteAssignments.userId, userId));
+
+      res.json(assignments);
+    } catch (error) {
+      console.error("Get user site assignments error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ===== DASHBOARD AND DATA ENDPOINTS =====
+
+  // Dashboard data endpoint (updated to work with proper site data)
   app.get("/api/dashboard", authenticateToken, async (req: AuthRequest, res) => {
     try {
       const db = getDb();
@@ -498,11 +538,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
         viewMode = prefs.length > 0 ? prefs[0].viewMode : 'closing';
       }
 
-      // Get sites based on user role
-      let userSites;
-      if (user.role === 'admin') {
-        userSites = await db.select().from(sites).where(eq(sites.isActive, true));
-      } else {
+      // Get sites from database first, then get distinct device IDs from sensor readings
+      const distinctDevices = await db
+        .selectDistinct({ deviceId: sensorReadings.deviceId })
+        .from(sensorReadings);
+
+      console.log(`📊 Found ${distinctDevices.length} distinct devices in sensor_readings`);
+
+      // Get or create sites for these devices
+      let userSites = [];
+      for (const device of distinctDevices) {
+        let existingSite = await db
+          .select()
+          .from(sites)
+          .where(eq(sites.deviceId, device.deviceId))
+          .limit(1);
+
+        if (existingSite.length === 0) {
+          // Create site if it doesn't exist
+          const newSite = await db
+            .insert(sites)
+            .values({
+              name: device.deviceId,
+              location: 'Auto-generated location',
+              deviceId: device.deviceId,
+              fuelCapacity: '2000.00',
+              lowFuelThreshold: '25.00',
+              isActive: true,
+            })
+            .returning();
+
+          userSites.push(newSite[0]);
+          console.log(`✅ Created new site for device: ${device.deviceId}`);
+        } else {
+          userSites.push(existingSite[0]);
+        }
+      }
+
+      // Filter sites based on user role and assignments
+      if (user.role !== 'admin') {
         const assignedSiteIds = await db
           .select({ siteId: userSiteAssignments.siteId })
           .from(userSiteAssignments)
@@ -517,15 +591,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
 
-        userSites = await db
-          .select()
-          .from(sites)
-          .where(
-            and(
-              eq(sites.isActive, true),
-              inArray(sites.id, assignedSiteIds.map(a => a.siteId))
-            )
-          );
+        userSites = userSites.filter(site => 
+          assignedSiteIds.some(assigned => assigned.siteId === site.id)
+        );
       }
 
       // Get latest readings for each site
@@ -546,7 +614,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Convert real-time readings to daily reading format
           const fuelLevel = realtimeReadings.find(r => r.sensorName === 'fuel_sensor_level')?.value || 0;
           const fuelVolume = realtimeReadings.find(r => r.sensorName === 'fuel_sensor_volume')?.value || 0;
-          const temperature = realtimeReadings.find(r => r.sensorName === 'fuel_sensor_temperature')?.value || 0;
+          const temperature = realtimeReadings.find(r => r.sensorName === 'fuel_sensor_temperature' || r.sensorName === 'fuel_sensor_temp')?.value || 0;
           const generatorState = realtimeReadings.find(r => r.sensorName === 'generator_state')?.value?.toString() || 'unknown';
           const zesaState = realtimeReadings.find(r => r.sensorName === 'zesa_state')?.value?.toString() || 'unknown';
 

@@ -34,11 +34,20 @@ class DatabaseConnection {
         console.log('SSH tunnel established successfully');
       }
 
-      // Database configuration
+      // Database configuration - connect through SSH tunnel
       const dbConfig = {
-        connectionString: process.env.DATABASE_URL,
+        host: '127.0.0.1',
+        port: this.tunnelPort,
+        user: process.env.DB_USER || 'sa',
+        password: process.env.DB_PASSWORD || 's3rv3r5mxdb',
+        database: process.env.DB_NAME || 'sensorsdb',
+        ssl: false, // No SSL through SSH tunnel
+        connectTimeoutMS: 10000,
+        idleTimeoutMS: 30000,
       };
 
+      console.log('Connecting to PostgreSQL through SSH tunnel...');
+      
       // Create PostgreSQL client with error handling
       this.pgClient = new Client(dbConfig);
       
@@ -56,13 +65,14 @@ class DatabaseConnection {
       });
 
       await this.pgClient.connect();
+      console.log('PostgreSQL connected successfully');
       
       this.db = drizzle(this.pgClient, { schema });
 
       // Create tables if they don't exist
       await this.createTables();
 
-      console.log('Database connected successfully');
+      console.log('Database connected and initialized successfully');
       return this.db;
     } catch (error) {
       console.error('Database connection failed:', error);
@@ -152,6 +162,7 @@ class DatabaseConnection {
         password: process.env.SSH_PASSWORD,
         port: 22,
         readyTimeout: 30000,
+        keepaliveInterval: 60000,
       });
     });
   }
@@ -159,7 +170,10 @@ class DatabaseConnection {
   private async createTables() {
     if (!this.pgClient) return;
 
+    console.log('Creating application tables (not sensor_readings - that exists)...');
+
     const createTablesSQL = `
+      -- Create users table
       CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
@@ -172,6 +186,7 @@ class DatabaseConnection {
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
 
+      -- Create sites table
       CREATE TABLE IF NOT EXISTS sites (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL,
@@ -183,16 +198,19 @@ class DatabaseConnection {
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
 
+      -- Create user site assignments
       CREATE TABLE IF NOT EXISTS user_site_assignments (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL REFERENCES users(id),
-        site_id INTEGER NOT NULL REFERENCES sites(id),
-        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE(user_id, site_id)
       );
 
+      -- Create daily closing readings
       CREATE TABLE IF NOT EXISTS daily_closing_readings (
         id SERIAL PRIMARY KEY,
-        site_id INTEGER NOT NULL REFERENCES sites(id),
+        site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
         device_id TEXT NOT NULL,
         fuel_level DECIMAL(5,2),
         fuel_volume DECIMAL(10,2),
@@ -203,11 +221,13 @@ class DatabaseConnection {
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
 
+      -- Create admin preferences
       CREATE TABLE IF NOT EXISTS admin_preferences (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER NOT NULL REFERENCES users(id),
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         view_mode TEXT NOT NULL DEFAULT 'closing',
-        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE(user_id)
       );
 
       -- Create default admin user if not exists
@@ -215,30 +235,131 @@ class DatabaseConnection {
       VALUES ('admin', 'admin@fuelmonitor.com', '$2b$10$.XgW4LNBHnMqCnGczUy5/etAp/KCsAYtTexha2Nn5toSsU.2ai6v.', 'admin', 'System Administrator')
       ON CONFLICT (username) DO NOTHING;
 
-      -- Create sample sites if not exists
-      INSERT INTO sites (name, location, device_id, fuel_capacity, low_fuel_threshold)
+      -- Create some sample users for testing (password: secret)
+      INSERT INTO users (username, email, password, role, full_name, is_active)
       VALUES 
-        ('Main Site A', 'Harare Branch', 'DEVICE_001', 2000.00, 25.00),
-        ('Site B', 'Bulawayo Branch', 'DEVICE_002', 2000.00, 25.00),
-        ('Site C', 'Mutare Branch', 'DEVICE_003', 2000.00, 25.00),
-        ('Site D', 'Gweru Branch', 'DEVICE_004', 2000.00, 25.00)
-      ON CONFLICT (device_id) DO NOTHING;
+        ('manager1', 'manager1@fuelmonitor.com', '$2b$10$.XgW4LNBHnMqCnGczUy5/etAp/KCsAYtTexha2Nn5toSsU.2ai6v.', 'manager', 'John Manager', true),
+        ('supervisor1', 'supervisor1@fuelmonitor.com', '$2b$10$.XgW4LNBHnMqCnGczUy5/etAp/KCsAYtTexha2Nn5toSsU.2ai6v.', 'supervisor', 'Jane Supervisor', true)
+      ON CONFLICT (username) DO NOTHING;
     `;
 
     try {
       await this.pgClient.query(createTablesSQL);
-      console.log('Database tables created successfully');
+      console.log('✅ Application tables created successfully');
+      
+      // Auto-create sites from existing sensor_readings data
+      await this.autoCreateSitesFromSensorData();
+      
     } catch (error) {
-      console.error('Error creating tables:', error);
+      console.error('❌ Error creating tables:', error);
+      throw error;
+    }
+  }
+
+  private async autoCreateSitesFromSensorData() {
+    if (!this.pgClient) return;
+
+    try {
+      console.log('🔍 Checking for sites to auto-create from sensor_readings...');
+
+      // Check if sensor_readings table exists
+      const tableExistsQuery = `
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'sensor_readings'
+        );
+      `;
+      
+      const tableExists = await this.pgClient.query(tableExistsQuery);
+      
+      if (!tableExists.rows[0].exists) {
+        console.log('⚠️ sensor_readings table does not exist - skipping site auto-creation');
+        return;
+      }
+
+      // Get distinct device IDs from sensor_readings
+      const distinctDevicesQuery = 'SELECT DISTINCT device_id FROM sensor_readings LIMIT 20';
+      const result = await this.pgClient.query(distinctDevicesQuery);
+      
+      console.log(`📊 Found ${result.rows.length} distinct devices in sensor_readings`);
+
+      if (result.rows.length === 0) {
+        console.log('⚠️ No device data found in sensor_readings');
+        return;
+      }
+
+      // Create sites for devices that don't already have sites
+      let createdCount = 0;
+      for (const row of result.rows) {
+        const deviceId = row.device_id;
+        
+        try {
+          // Check if site already exists
+          const existingSite = await this.pgClient.query(
+            'SELECT id FROM sites WHERE device_id = $1', 
+            [deviceId]
+          );
+
+          if (existingSite.rows.length === 0) {
+            // Create site
+            const siteName = deviceId.replace('simbisa-', '').replace(/[-_]/g, ' ').toUpperCase() + ' Site';
+            const siteLocation = deviceId.replace('simbisa-', '').replace(/[-_]/g, ' ').toUpperCase() + ' Location';
+
+            await this.pgClient.query(`
+              INSERT INTO sites (name, location, device_id, fuel_capacity, low_fuel_threshold, is_active)
+              VALUES ($1, $2, $3, $4, $5, $6)
+            `, [siteName, siteLocation, deviceId, 2000.00, 25.00, true]);
+
+            console.log(`✅ Created site: ${siteName} for device ${deviceId}`);
+            createdCount++;
+          }
+        } catch (siteError) {
+          console.error(`❌ Error creating site for device ${deviceId}:`, siteError);
+        }
+      }
+
+      if (createdCount > 0) {
+        console.log(`🎉 Auto-created ${createdCount} sites from sensor_readings data`);
+      } else {
+        console.log('ℹ️ All sites already exist for current sensor devices');
+      }
+
+    } catch (error) {
+      console.error('❌ Error in autoCreateSitesFromSensorData:', error);
+      // Don't throw - this is not critical for app startup
+    }
+  }
+
+  async testConnection() {
+    try {
+      if (!this.pgClient) {
+        await this.connect();
+      }
+      
+      // Test the connection with a simple query
+      const result = await this.pgClient!.query('SELECT NOW() as current_time, version() as db_version');
+      console.log('✅ Database connection test successful:', {
+        currentTime: result.rows[0].current_time,
+        version: result.rows[0].db_version.substring(0, 50) + '...'
+      });
+      
+      return true;
+    } catch (error) {
+      console.error('❌ Database connection test failed:', error);
+      return false;
     }
   }
 
   async disconnect() {
+    console.log('🔌 Disconnecting from database...');
+    
     if (this.pgClient) {
       try {
         await this.pgClient.end();
+        console.log('✅ PostgreSQL connection closed');
       } catch (error) {
-        console.error('Error closing PostgreSQL connection:', error);
+        console.error('❌ Error closing PostgreSQL connection:', error);
       }
       this.pgClient = null;
     }
@@ -246,8 +367,9 @@ class DatabaseConnection {
     if (this.localServer) {
       try {
         this.localServer.close();
+        console.log('✅ Local SSH tunnel server closed');
       } catch (error) {
-        console.error('Error closing local server:', error);
+        console.error('❌ Error closing local server:', error);
       }
       this.localServer = null;
     }
@@ -255,8 +377,9 @@ class DatabaseConnection {
     if (this.sshClient) {
       try {
         this.sshClient.end();
+        console.log('✅ SSH connection closed');
       } catch (error) {
-        console.error('Error closing SSH connection:', error);
+        console.error('❌ Error closing SSH connection:', error);
       }
       this.sshClient = null;
     }
@@ -270,7 +393,29 @@ class DatabaseConnection {
     }
     return this.db;
   }
+
+  // Utility method to get connection status
+  getStatus() {
+    return {
+      isConnected: !!(this.db && this.pgClient && !this.pgClient.ended),
+      hasSSHTunnel: !!this.sshClient,
+      hasLocalServer: !!this.localServer,
+    };
+  }
 }
 
 export const dbConnection = new DatabaseConnection();
 export const getDb = () => dbConnection.getDb();
+
+// Add graceful shutdown handling
+process.on('SIGTERM', async () => {
+  console.log('🛑 SIGTERM received, closing database connections...');
+  await dbConnection.disconnect();
+  process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+  console.log('🛑 SIGINT received, closing database connections...');
+  await dbConnection.disconnect();
+  process.exit(0);
+});

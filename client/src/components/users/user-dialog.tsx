@@ -1,8 +1,9 @@
-// client/src/components/users/user-dialog.tsx
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/api";
 import {
   Dialog,
   DialogContent,
@@ -29,7 +30,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, User, Mail, Lock, UserCheck } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Loader2, User, Mail, Lock, UserCheck, MapPin } from "lucide-react";
 import type { User as UserType } from "@shared/schema";
 
 const userFormSchema = z.object({
@@ -39,9 +41,17 @@ const userFormSchema = z.object({
   role: z.enum(["admin", "supervisor", "manager"]),
   password: z.string().min(6, "Password must be at least 6 characters").optional(),
   isActive: z.boolean().default(true),
+  siteIds: z.array(z.number()).optional(),
 });
 
 type UserFormValues = z.infer<typeof userFormSchema>;
+
+interface Site {
+  id: number;
+  name: string;
+  location: string;
+  deviceId: string;
+}
 
 interface UserDialogProps {
   open: boolean;
@@ -59,6 +69,7 @@ export default function UserDialog({
   isLoading 
 }: UserDialogProps) {
   const isEdit = !!user;
+  const [selectedSites, setSelectedSites] = useState<number[]>([]);
   
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userFormSchema),
@@ -69,7 +80,23 @@ export default function UserDialog({
       role: "manager",
       password: "",
       isActive: true,
+      siteIds: [],
     },
+  });
+
+  // Watch the role field to show/hide site assignments
+  const selectedRole = form.watch("role");
+
+  // Get all available sites for assignment
+  const { data: sites } = useQuery<Site[]>({
+    queryKey: ["/api/sites"],
+    enabled: open && (selectedRole === 'manager' || selectedRole === 'supervisor'),
+  });
+
+  // Get existing user site assignments if editing
+  const { data: userSites } = useQuery<{ siteId: number; siteName: string; siteLocation: string; }[]>({
+    queryKey: [`/api/users/${user?.id}/sites`],
+    enabled: open && isEdit && !!user?.id && (selectedRole === 'manager' || selectedRole === 'supervisor'),
   });
 
   // Reset form when dialog opens/closes or user changes
@@ -83,6 +110,7 @@ export default function UserDialog({
         role: user.role as "admin" | "supervisor" | "manager",
         password: "", // Always empty for edit
         isActive: user.isActive,
+        siteIds: [],
       });
     } else if (open) {
       // Add mode - reset to defaults
@@ -93,29 +121,88 @@ export default function UserDialog({
         role: "manager",
         password: "",
         isActive: true,
+        siteIds: [],
       });
+      setSelectedSites([]);
     }
   }, [open, user, form]);
 
+  // Update selected sites when user sites data loads
+  useEffect(() => {
+    if (userSites && isEdit) {
+      const siteIds = userSites.map(us => us.siteId);
+      setSelectedSites(siteIds);
+      form.setValue('siteIds', siteIds);
+    }
+  }, [userSites, isEdit, form]);
+
+  // Update form siteIds when selectedSites changes
+  useEffect(() => {
+    form.setValue('siteIds', selectedSites);
+  }, [selectedSites, form]);
+
+  const handleSiteToggle = (siteId: number) => {
+    setSelectedSites(prev => {
+      if (prev.includes(siteId)) {
+        return prev.filter(id => id !== siteId);
+      } else {
+        if (selectedRole === 'manager') {
+          // Manager can only be assigned to one site
+          return [siteId];
+        } else {
+          // Supervisor can be assigned to multiple sites
+          return [...prev, siteId];
+        }
+      }
+    });
+  };
+
   const handleSubmit = async (data: UserFormValues) => {
     try {
-      await onSubmit(data);
+      // Include site assignments in the submission
+      const submitData = {
+        ...data,
+        siteIds: selectedRole === 'admin' ? [] : selectedSites,
+      };
+
+      await onSubmit(submitData);
+      
+      // If this is a new user or we have site assignments to update
+      if (selectedRole !== 'admin' && selectedSites.length > 0) {
+        // Handle site assignments (will be done in parent component)
+        console.log('Site assignments:', selectedSites);
+      }
+
       form.reset();
+      setSelectedSites([]);
       onOpenChange(false);
     } catch (error) {
-      // Error handling is done in parent component
       console.error("Form submission error:", error);
     }
   };
 
   const handleCancel = () => {
     form.reset();
+    setSelectedSites([]);
     onOpenChange(false);
+  };
+
+  const getRoleDescription = (role: string) => {
+    switch (role) {
+      case 'admin':
+        return 'Full system access to all sites and administration';
+      case 'supervisor':
+        return 'Access to multiple assigned sites';
+      case 'manager':
+        return 'Access to one assigned site only';
+      default:
+        return '';
+    }
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <UserCheck className="h-5 w-5 text-primary" />
@@ -123,14 +210,14 @@ export default function UserDialog({
           </DialogTitle>
           <DialogDescription>
             {isEdit 
-              ? "Update user information and permissions." 
-              : "Create a new user account with appropriate role and permissions."
+              ? "Update user information, role and site assignments." 
+              : "Create a new user account with appropriate role and site assignments."
             }
           </DialogDescription>
         </DialogHeader>
 
         <Form {...form}>
-          <div onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
             <div className="grid grid-cols-2 gap-4">
               {/* Username */}
               <FormField
@@ -161,7 +248,7 @@ export default function UserDialog({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Role</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select role" />
@@ -173,6 +260,9 @@ export default function UserDialog({
                         <SelectItem value="manager">Manager</SelectItem>
                       </SelectContent>
                     </Select>
+                    <div className="text-xs text-gray-600 mt-1">
+                      {getRoleDescription(field.value)}
+                    </div>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -234,6 +324,65 @@ export default function UserDialog({
               )}
             />
 
+            {/* Site Assignments - Only show for Manager and Supervisor */}
+            {(selectedRole === 'manager' || selectedRole === 'supervisor') && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4" />
+                  <span className="font-medium">
+                    Site Assignments {selectedRole === 'manager' ? '(Select One)' : '(Select Multiple)'}
+                  </span>
+                </div>
+                
+                {sites && sites.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto border rounded-lg p-3">
+                    {sites.map((site) => (
+                      <div key={site.id} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={`site-${site.id}`}
+                          checked={selectedSites.includes(site.id)}
+                          onCheckedChange={() => handleSiteToggle(site.id)}
+                        />
+                        <label 
+                          htmlFor={`site-${site.id}`}
+                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1"
+                        >
+                          <div>
+                            <div className="font-medium">{site.name}</div>
+                            <div className="text-xs text-gray-500">{site.location} • {site.deviceId}</div>
+                          </div>
+                        </label>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-gray-500 p-3 border rounded-lg bg-gray-50">
+                    No sites available for assignment. Sites are automatically created from sensor data.
+                  </div>
+                )}
+
+                {selectedRole === 'manager' && selectedSites.length > 1 && (
+                  <div className="text-sm text-orange-600 bg-orange-50 p-2 rounded">
+                    ⚠️ Managers can only be assigned to one site. Only the last selected site will be saved.
+                  </div>
+                )}
+
+                {selectedSites.length > 0 && (
+                  <div className="text-sm text-blue-600 bg-blue-50 p-2 rounded">
+                    ✅ {selectedSites.length} site{selectedSites.length > 1 ? 's' : ''} selected
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Admin notice */}
+            {selectedRole === 'admin' && (
+              <div className="text-sm text-green-600 bg-green-50 p-3 rounded-lg flex items-center gap-2">
+                <UserCheck className="h-4 w-4" />
+                <span>Admin users have access to all sites automatically. No site assignment needed.</span>
+              </div>
+            )}
+
             {/* Active Status */}
             <FormField
               control={form.control}
@@ -268,13 +417,12 @@ export default function UserDialog({
               <Button 
                 type="submit" 
                 disabled={isLoading}
-                onClick={form.handleSubmit(handleSubmit)}
               >
                 {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {isEdit ? "Update User" : "Create User"}
               </Button>
             </DialogFooter>
-          </div>
+          </form>
         </Form>
       </DialogContent>
     </Dialog>
