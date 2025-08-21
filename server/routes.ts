@@ -596,18 +596,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
       }
 
-      // Get latest readings for each site
+      // Only consider readings from the last 24 hours
+      const now = new Date();
+      const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
       const sitesWithReadings: SiteWithReadings[] = [];
-      
       for (const site of userSites) {
         let latestReading;
-        
         if (viewMode === 'realtime' && user.role === 'admin') {
-          // Get real-time data from sensor_readings
+          // Get real-time data from sensor_readings in last 24h
           const realtimeReadings = await db
             .select()
             .from(sensorReadings)
-            .where(eq(sensorReadings.deviceId, site.deviceId))
+            .where(
+              and(
+                eq(sensorReadings.deviceId, site.deviceId),
+                sensorReadings.time.gte(last24h)
+              )
+            )
             .orderBy(desc(sensorReadings.time))
             .limit(10);
 
@@ -631,11 +637,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             createdAt: new Date(),
           };
         } else {
-          // Get daily closing readings
+          // Get daily closing readings in last 24h
           const closingReading = await db
             .select()
             .from(dailyClosingReadings)
-            .where(eq(dailyClosingReadings.siteId, site.id))
+            .where(
+              and(
+                eq(dailyClosingReadings.siteId, site.id),
+                dailyClosingReadings.capturedAt.gte(last24h)
+              )
+            )
             .orderBy(desc(dailyClosingReadings.capturedAt))
             .limit(1);
 
@@ -645,7 +656,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const fuelLevelPercentage = latestReading ? parseFloat(latestReading.fuelLevel || '0') : 0;
         const generatorOnline = latestReading?.generatorState === 'on' || latestReading?.generatorState === '1';
         const zesaOnline = latestReading?.zesaState === 'on' || latestReading?.zesaState === '1';
-        
+
         let alertStatus: 'normal' | 'low_fuel' | 'generator_off' = 'normal';
         if (fuelLevelPercentage < parseFloat(site.lowFuelThreshold)) {
           alertStatus = 'low_fuel';
@@ -671,16 +682,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         generatorsRunning: sitesWithReadings.filter(s => s.generatorOnline).length,
       };
 
-      // Get recent activity
-      const recentActivity = sitesWithReadings.slice(0, 5).map((site, index) => ({
-        id: index + 1,
-        siteId: site.id,
-        siteName: site.name,
-        event: site.alertStatus === 'low_fuel' ? 'Low Fuel Alert' : 'Daily Reading Captured',
-        value: `${site.fuelLevelPercentage}% (${site.latestReading?.fuelVolume || '0'}L)`,
-        timestamp: site.latestReading?.capturedAt || new Date(),
-        status: site.alertStatus === 'low_fuel' ? 'Low Fuel' : 'Normal',
-      }));
+      // Get recent activity (last 24h only)
+      const recentActivity = sitesWithReadings
+        .filter(site => site.latestReading && site.latestReading.capturedAt && site.latestReading.capturedAt >= last24h)
+        .slice(0, 5)
+        .map((site, index) => ({
+          id: index + 1,
+          siteId: site.id,
+          siteName: site.name,
+          event: site.alertStatus === 'low_fuel' ? 'Low Fuel Alert' : 'Daily Reading Captured',
+          value: `${site.fuelLevelPercentage}% (${site.latestReading?.fuelVolume || '0'}L)`,
+          timestamp: site.latestReading?.capturedAt || new Date(),
+          status: site.alertStatus === 'low_fuel' ? 'Low Fuel' : 'Normal',
+        }));
 
       const dashboardData: DashboardData & { viewMode: string } = {
         sites: sitesWithReadings,
