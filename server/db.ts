@@ -265,14 +265,9 @@ class DatabaseConnection {
           );
 
           if (existing.rows.length === 0) {
-            // Convert device_id to proper name
-            // simbisa-walktalk -> Simbisa Walktalk
-            const siteName = deviceId
-              .replace(/^simbisa-/, 'Simbisa ')
-              .replace(/-/g, ' ')
-              .replace(/\b\w/g, l => l.toUpperCase());
-
-            const siteLocation = siteName + ' Location';
+            // Use device_id as-is for both name and location
+            const siteName = deviceId;  // Keep exact: simbisa-avondale
+            const siteLocation = deviceId + ' location';  // simbisa-avondale location
 
             await this.pgClient.query(`
               INSERT INTO sites (name, location, device_id, fuel_capacity, low_fuel_threshold, is_active)

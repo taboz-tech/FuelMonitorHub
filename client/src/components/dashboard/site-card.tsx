@@ -40,18 +40,47 @@ export default function SiteCard({ site }: SiteCardProps) {
     }
   };
 
+  // Format date like "09 Aug, 10:58"
+  const formatLastUpdated = (timestamp: string | Date) => {
+    if (!timestamp) return "No data";
+    
+    const date = new Date(timestamp);
+    const now = new Date();
+    
+    // Check if the date is valid
+    if (isNaN(date.getTime())) return "Invalid date";
+    
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = months[date.getMonth()];
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    
+    // If it's today, just show time
+    if (date.toDateString() === now.toDateString()) {
+      return `Today, ${hours}:${minutes}`;
+    }
+    
+    // If it's this year, show day month, time
+    if (date.getFullYear() === now.getFullYear()) {
+      return `${day} ${month}, ${hours}:${minutes}`;
+    }
+    
+    // If it's a different year, include year
+    return `${day} ${month} ${date.getFullYear()}, ${hours}:${minutes}`;
+  };
+
   // Handle zero and undefined values properly
   const fuelLevel = Math.max(0, Math.min(100, site.fuelLevelPercentage ?? 0));
   const fuelVolume = parseFloat(site.latestReading?.fuelVolume || '0');
   const temperature = parseFloat(site.latestReading?.temperature || '0');
 
-  // Log debug info for this site
-  console.log(`SiteCard ${site.name}:`, {
-    fuelLevelPercentage: site.fuelLevelPercentage,
-    fuelLevel: fuelLevel,
-    latestReading: site.latestReading,
-    alertStatus: site.alertStatus
-  });
+  // Clean up the site name - remove "Auto-generated location" part
+  const cleanLocation = site.location.replace('Auto-generated location', '').trim() || site.name;
 
   return (
     <Card className="bg-white hover:shadow-md transition-shadow duration-200 border border-gray-200">
@@ -64,7 +93,7 @@ export default function SiteCard({ site }: SiteCardProps) {
             </div>
             <div>
               <h3 className="font-semibold text-gray-900 text-base">{site.name}</h3>
-              <p className="text-sm text-gray-600">{site.location}</p>
+              <p className="text-sm text-gray-600">{cleanLocation}</p>
             </div>
           </div>
           
@@ -94,7 +123,7 @@ export default function SiteCard({ site }: SiteCardProps) {
           <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
             <div 
               className={`h-full transition-all duration-500 ${getFuelLevelColor(fuelLevel)}`}
-              style={{ width: `${Math.max(2, fuelLevel)}%` }} // Show at least 2% width for visibility
+              style={{ width: `${Math.max(2, fuelLevel)}%` }}
             />
           </div>
           
@@ -122,10 +151,10 @@ export default function SiteCard({ site }: SiteCardProps) {
             {getAlertBadge(site.alertStatus)}
           </div>
           
-          {/* Last Updated or No Data indicator */}
+          {/* Last Updated - FIXED FORMAT */}
           <div className="text-xs text-gray-500 pt-2 border-t border-gray-100">
             {site.latestReading?.capturedAt ? (
-              `Last updated: ${new Date(site.latestReading.capturedAt).toLocaleTimeString()}`
+              `Last updated: ${formatLastUpdated(site.latestReading.capturedAt)}`
             ) : (
               <span className="text-orange-600 font-medium">No sensor readings available</span>
             )}
