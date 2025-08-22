@@ -40,47 +40,80 @@ export default function SiteCard({ site }: SiteCardProps) {
     }
   };
 
-  // Format date like "09 Aug, 10:58"
+  // FIXED: Better timestamp formatting
   const formatLastUpdated = (timestamp: string | Date) => {
-    if (!timestamp) return "No data";
+    if (!timestamp) return "No data available";
     
-    const date = new Date(timestamp);
-    const now = new Date();
-    
-    // Check if the date is valid
-    if (isNaN(date.getTime())) return "Invalid date";
-    
-    const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-    ];
-    
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = months[date.getMonth()];
-    const hours = date.getHours().toString().padStart(2, '0');
-    const minutes = date.getMinutes().toString().padStart(2, '0');
-    
-    // If it's today, just show time
-    if (date.toDateString() === now.toDateString()) {
-      return `Today, ${hours}:${minutes}`;
+    try {
+      const date = new Date(timestamp);
+      const now = new Date();
+      
+      // Check if the date is valid
+      if (isNaN(date.getTime())) return "Invalid date";
+      
+      const diffMs = now.getTime() - date.getTime();
+      const diffMinutes = Math.floor(diffMs / (1000 * 60));
+      const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+      
+      const months = [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      ];
+      
+      // Format based on how recent the data is
+      if (diffMinutes < 1) {
+        return "Just now";
+      } else if (diffMinutes < 60) {
+        return `${diffMinutes} min${diffMinutes === 1 ? '' : 's'} ago`;
+      } else if (diffHours < 24 && date.toDateString() === now.toDateString()) {
+        // Same day
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        return `Today, ${hours}:${minutes}`;
+      } else if (diffDays < 7) {
+        // Within a week
+        const day = date.getDate().toString().padStart(2, '0');
+        const month = months[date.getMonth()];
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        return `${day} ${month}, ${hours}:${minutes}`;
+      } else {
+        // Older than a week
+        const day = date.getDate().toString().padStart(2, '0');
+        const month = months[date.getMonth()];
+        const year = date.getFullYear();
+        const hours = date.getHours().toString().padStart(2, '0');
+        const minutes = date.getMinutes().toString().padStart(2, '0');
+        
+        if (year === now.getFullYear()) {
+          return `${day} ${month}, ${hours}:${minutes}`;
+        } else {
+          return `${day} ${month} ${year}, ${hours}:${minutes}`;
+        }
+      }
+    } catch (error) {
+      console.error('Error formatting timestamp:', error);
+      return "Invalid date format";
     }
-    
-    // If it's this year, show day month, time
-    if (date.getFullYear() === now.getFullYear()) {
-      return `${day} ${month}, ${hours}:${minutes}`;
-    }
-    
-    // If it's a different year, include year
-    return `${day} ${month} ${date.getFullYear()}, ${hours}:${minutes}`;
   };
 
-  // Handle zero and undefined values properly
+  // FIXED: Handle zero and undefined values properly
   const fuelLevel = Math.max(0, Math.min(100, site.fuelLevelPercentage ?? 0));
-  const fuelVolume = parseFloat(site.latestReading?.fuelVolume || '0');
-  const temperature = parseFloat(site.latestReading?.temperature || '0');
+  const fuelVolume = site.latestReading?.fuelVolume ? parseFloat(site.latestReading.fuelVolume) : 0;
+  const temperature = site.latestReading?.temperature ? parseFloat(site.latestReading.temperature) : 0;
 
-  // Clean up the site name - remove "Auto-generated location" part
-  const cleanLocation = site.location.replace('Auto-generated location', '').trim() || site.name;
+  // Clean up the site name - remove "simbisa-" prefix and make it readable
+  const cleanSiteName = site.name
+    .replace(/^simbisa-/, '')
+    .split('-')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+
+  const cleanLocation = site.location
+    .replace('Auto-generated location', '')
+    .replace(/^simbisa-/, '')
+    .trim() || cleanSiteName;
 
   return (
     <Card className="bg-white hover:shadow-md transition-shadow duration-200 border border-gray-200">
@@ -92,7 +125,7 @@ export default function SiteCard({ site }: SiteCardProps) {
               <Fuel className="text-blue-600 text-xl" />
             </div>
             <div>
-              <h3 className="font-semibold text-gray-900 text-base">{site.name}</h3>
+              <h3 className="font-semibold text-gray-900 text-base">{cleanSiteName}</h3>
               <p className="text-sm text-gray-600">{cleanLocation}</p>
             </div>
           </div>
@@ -151,12 +184,14 @@ export default function SiteCard({ site }: SiteCardProps) {
             {getAlertBadge(site.alertStatus)}
           </div>
           
-          {/* Last Updated - FIXED FORMAT */}
+          {/* FIXED: Last Updated with meaningful timestamp */}
           <div className="text-xs text-gray-500 pt-2 border-t border-gray-100">
             {site.latestReading?.capturedAt ? (
-              `Last updated: ${formatLastUpdated(site.latestReading.capturedAt)}`
+              <>
+                <span className="font-medium">Last updated:</span> {formatLastUpdated(site.latestReading.capturedAt)}
+              </>
             ) : (
-              <span className="text-orange-600 font-medium">No sensor readings available</span>
+              <span className="text-orange-600 font-medium">No recent sensor data available</span>
             )}
           </div>
         </div>
