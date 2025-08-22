@@ -541,6 +541,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         viewMode = prefs.length > 0 ? prefs[0].viewMode : 'closing';
       }
 
+      console.log(`🎛️ View mode: ${viewMode}`);
+
       // Get sites based on user role - ONLY SIMBISA SITES
       let userSites = [];
       
@@ -605,51 +607,72 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let latestReading: any = null;
 
         if (viewMode === 'realtime' && user.role === 'admin') {
-          // Get REAL-TIME data from sensor_readings
+          // Get REAL-TIME data from sensor_readings - FIXED VERSION
           try {
-            // FIXED: Get the most recent readings for each sensor type
-            const realtimeQuery = `
-              SELECT DISTINCT ON (sensor_name) 
-                time, device_id, sensor_name, value, unit
-              FROM sensor_readings 
-              WHERE device_id = $1
-              ORDER BY sensor_name, time DESC
-            `;
+            console.log(`📈 Getting real-time data for ${site.deviceId}`);
             
-            const realtimeResult = await db.execute(sql`${sql.raw(realtimeQuery)}`, [site.deviceId]);
-            const realtimeReadings = realtimeResult.rows;
+            // ✅ CORRECT: Get the latest reading for each specific sensor type
+            const sensorTypes = [
+              'fuel_sensor_level', 
+              'fuel_sensor_temp', 
+              'fuel_sensor_volume', 
+              'generator_state', 
+              'zesa_state'
+            ];
+            
+            const sensorMap = new Map();
+            let latestTimestamp = new Date(0); // Start with epoch
+            
+            for (const sensorType of sensorTypes) {
+              try {
+                // Query each sensor type individually to get the absolute latest
+                const latestSensorQuery = `
+                  SELECT time, device_id, sensor_name, value, unit
+                  FROM sensor_readings 
+                  WHERE device_id = $1 AND sensor_name = $2
+                  ORDER BY time DESC
+                  LIMIT 1
+                `;
+                
+                const sensorResult = await db.execute(sql`${sql.raw(latestSensorQuery)}`, [site.deviceId, sensorType]);
+                
+                if (sensorResult.rows.length > 0) {
+                  const row = sensorResult.rows[0] as any;
+                  sensorMap.set(sensorType, row);
+                  
+                  // Track the latest timestamp across all sensors
+                  const sensorTime = new Date(row.time);
+                  if (sensorTime > latestTimestamp) {
+                    latestTimestamp = sensorTime;
+                  }
+                  
+                  console.log(`📊 ${site.deviceId} ${sensorType}: ${row.value}${row.unit || ''} at ${row.time}`);
+                } else {
+                  console.log(`⚠️ No data found for ${site.deviceId} ${sensorType}`);
+                }
+              } catch (sensorError) {
+                console.error(`❌ Error getting ${sensorType} for ${site.deviceId}:`, sensorError);
+              }
+            }
 
-            if (realtimeReadings.length > 0) {
-              console.log(`📈 Found ${realtimeReadings.length} sensor types for ${site.deviceId}`);
-              
-              // Map sensor readings by type
-              const sensorMap = new Map();
-              realtimeReadings.forEach((row: any) => {
-                const sensorKey = row.sensor_name.toLowerCase().trim();
-                sensorMap.set(sensorKey, row);
-              });
-
-              // Get the latest timestamp
-              const timestamps = realtimeReadings.map((r: any) => new Date(r.time));
-              const latestTimestamp = new Date(Math.max(...timestamps.map(t => t.getTime())));
-
-              // Extract sensor values properly
+            if (sensorMap.size > 0) {
+              // Extract sensor values with correct mapping
               const fuelLevelRow = sensorMap.get('fuel_sensor_level');
               const fuelVolumeRow = sensorMap.get('fuel_sensor_volume');
-              const tempRow = sensorMap.get('fuel_sensor_temp') || sensorMap.get('fuel_sensor_temperature');
+              const tempRow = sensorMap.get('fuel_sensor_temp');
               const generatorRow = sensorMap.get('generator_state');
               const zesaRow = sensorMap.get('zesa_state');
 
-              console.log(`📊 Sensor data for ${site.name}:`, {
+              console.log(`✅ Real-time data assembled for ${site.name}:`, {
                 fuelLevel: fuelLevelRow ? `${fuelLevelRow.value}%` : 'N/A',
                 fuelVolume: fuelVolumeRow ? `${fuelVolumeRow.value}L` : 'N/A',
                 temperature: tempRow ? `${tempRow.value}°C` : 'N/A',
-                generator: generatorRow?.value || 'unknown',
-                zesa: zesaRow?.value || 'unknown',
-                timestamp: latestTimestamp
+                generator: generatorRow ? generatorRow.value : 'N/A',
+                zesa: zesaRow ? zesaRow.value : 'N/A',
+                latestTimestamp: latestTimestamp.toISOString()
               });
 
-              // Create the reading object with CORRECT values
+              // Create the reading object with EXACT values from sensor_readings
               latestReading = {
                 id: 0,
                 siteId: site.id,
@@ -657,9 +680,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 fuelLevel: fuelLevelRow ? parseFloat(fuelLevelRow.value).toFixed(2) : null,
                 fuelVolume: fuelVolumeRow ? parseFloat(fuelVolumeRow.value).toFixed(2) : null,
                 temperature: tempRow ? parseFloat(tempRow.value).toFixed(2) : null,
-                generatorState: generatorRow ? generatorRow.value.toString() : 'unknown',
-                zesaState: zesaRow ? zesaRow.value.toString() : 'unknown',
-                capturedAt: latestTimestamp,
+                generatorState: generatorRow ? generatorRow.value.toString() : '-1',
+                zesaState: zesaRow ? zesaRow.value.toString() : '-1',
+                capturedAt: latestTimestamp, // This will be the exact timestamp from sensor_readings
                 createdAt: new Date(),
               };
             } else {
@@ -671,6 +694,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else {
           // Get daily closing readings
           try {
+            console.log(`📋 Getting daily closing readings for ${site.name}`);
             const closingReading = await db
               .select()
               .from(dailyClosingReadings)
@@ -680,46 +704,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
             if (closingReading.length > 0) {
               latestReading = closingReading[0];
+              console.log(`📋 Daily reading found for ${site.name}: ${latestReading.fuelLevel}% at ${latestReading.capturedAt}`);
+            } else {
+              console.log(`⚠️ No daily readings found for ${site.name}`);
             }
           } catch (error) {
             console.error(`❌ Error getting daily readings for ${site.name}:`, error);
           }
         }
 
-        // FIXED: Calculate fuel level percentage correctly
-        const fuelLevelPercentage = latestReading?.fuelLevel 
-          ? Math.max(0, Math.min(100, parseFloat(latestReading.fuelLevel)))
-          : 0;
+        // Process the site if we have valid reading data
+        if (latestReading) {
+          // Calculate fuel level percentage correctly
+          const fuelLevelPercentage = latestReading?.fuelLevel 
+            ? Math.max(0, Math.min(100, parseFloat(latestReading.fuelLevel)))
+            : 0;
 
-        // FIXED: Generator and ZESA state checking
-        const generatorOnline = ['1', 'on', 'true', '1.0', 1, true].includes(latestReading?.generatorState);
-        const zesaOnline = ['1', 'on', 'true', '1.0', 1, true].includes(latestReading?.zesaState);
+          // Generator and ZESA state checking - handle different state formats
+          const generatorOnline = latestReading.generatorState && 
+            ['1', 'on', 'true', '1.0'].includes(latestReading.generatorState.toString().toLowerCase());
+          
+          const zesaOnline = latestReading.zesaState && 
+            ['1', 'on', 'true', '1.0'].includes(latestReading.zesaState.toString().toLowerCase());
 
-        // FIXED: Alert status calculation
-        let alertStatus: 'normal' | 'low_fuel' | 'generator_off' = 'normal';
-        if (fuelLevelPercentage < parseFloat(site.lowFuelThreshold)) {
-          alertStatus = 'low_fuel';
-        } else if (!generatorOnline && fuelLevelPercentage > 0) {
-          alertStatus = 'generator_off';
-        }
+          // Alert status calculation
+          let alertStatus: 'normal' | 'low_fuel' | 'generator_off' = 'normal';
+          if (fuelLevelPercentage < parseFloat(site.lowFuelThreshold)) {
+            alertStatus = 'low_fuel';
+          } else if (!generatorOnline && fuelLevelPercentage > 0) {
+            alertStatus = 'generator_off';
+          }
 
-        // Only include sites that have actual meaningful data
-        const hasValidData = latestReading && (
-          fuelLevelPercentage > 0 || 
-          (latestReading.fuelVolume && parseFloat(latestReading.fuelVolume) > 0)
-        );
+          // Only include sites that have meaningful fuel data
+          const hasValidFuelData = fuelLevelPercentage > 0 || 
+            (latestReading.fuelVolume && parseFloat(latestReading.fuelVolume) > 0);
 
-        if (hasValidData) {
-          sitesWithReadings.push({
-            ...site,
-            latestReading,
-            generatorOnline,
-            zesaOnline,
-            fuelLevelPercentage,
-            alertStatus,
-          });
+          if (hasValidFuelData) {
+            sitesWithReadings.push({
+              ...site,
+              latestReading,
+              generatorOnline,
+              zesaOnline,
+              fuelLevelPercentage,
+              alertStatus,
+            });
+            
+            console.log(`✅ Added ${site.name}: ${fuelLevelPercentage.toFixed(1)}% fuel, last update: ${latestReading.capturedAt}`);
+          } else {
+            console.log(`⏭️ Skipping ${site.name} - no meaningful fuel data (${fuelLevelPercentage}%)`);
+          }
         } else {
-          console.log(`⏭️ Skipping ${site.name} - no meaningful sensor data`);
+          console.log(`⏭️ Skipping ${site.name} - no readings found`);
         }
       }
 
@@ -734,7 +769,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         generatorsRunning: sitesWithReadings.filter(s => s.generatorOnline).length,
       };
 
-      // Generate recent activity - with better timestamps
+      // Generate recent activity with proper timestamps
       const recentActivity = sitesWithReadings
         .filter(site => site.latestReading)
         .slice(0, 10)
@@ -761,7 +796,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         viewMode,
       };
 
-      console.log(`✅ Dashboard ready for ${user.username}:`, {
+      console.log(`✅ Dashboard complete for ${user.username}:`, {
         totalSitesInDB: userSites.length,
         sitesWithValidData: sitesWithReadings.length,
         lowFuelAlerts: systemStatus.lowFuelAlerts,
