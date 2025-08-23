@@ -667,8 +667,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 temperature: tempRow ? parseFloat(tempRow.value).toFixed(2) : null,
                 generatorState: generatorRow ? generatorRow.value.toString() : '-1',
                 zesaState: zesaRow ? zesaRow.value.toString() : '-1',
-                capturedAt: latestTimestamp, // Latest timestamp from DISTINCT ON query
-                createdAt: new Date(),
+                capturedAt: latestTimestamp, // Latest sensor timestamp from DB 'time' field
+                createdAt: latestTimestamp, // Use sensor timestamp, not API processing time
               };
             } else {
               console.log(`⚠️ No real-time readings found for ${site.deviceId} using DISTINCT ON query`);
