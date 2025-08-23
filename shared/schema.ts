@@ -139,6 +139,8 @@ export type DashboardData = {
     totalSites: number;
     lowFuelAlerts: number;
     generatorsRunning: number;
+    zesaRunning: number;        // NEW: ZESA running count
+    offlineSites: number;       // NEW: Offline sites count
   };
   recentActivity: Array<{
     id: number;

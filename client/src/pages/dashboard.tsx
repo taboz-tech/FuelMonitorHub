@@ -219,60 +219,96 @@ export default function Dashboard() {
             </Card>
           )}
 
-          {/* System Status Cards */}
-          {dashboardData?.systemStatus && (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-              <Card className="bg-white border-l-4 border-l-blue-500">
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-600">Sites Online</p>
-                      <p className="text-2xl font-bold text-blue-600">
-                        {dashboardData.systemStatus.sitesOnline}/{dashboardData.systemStatus.totalSites}
-                      </p>
+          {/* Enhanced System Status Cards - 5 Cards */}
+            {dashboardData?.systemStatus && (
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+                {/* Sites Online */}
+                <Card className="bg-white border-l-4 border-l-blue-500">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Sites Online</p>
+                        <p className="text-xl font-bold text-blue-600">
+                          {dashboardData.systemStatus.sitesOnline}/{dashboardData.systemStatus.totalSites}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">Active & reporting</p>
+                      </div>
+                      <CheckCircle className="h-6 w-6 text-blue-500" />
                     </div>
-                    <CheckCircle className="h-8 w-8 text-blue-500" />
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
 
-              <Card className="bg-white border-l-4 border-l-red-500">
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-600">Low Fuel Alerts</p>
-                      <p className="text-2xl font-bold text-red-600">{dashboardData.systemStatus.lowFuelAlerts}</p>
+                {/* Low Fuel Alerts */}
+                <Card className="bg-white border-l-4 border-l-red-500">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Low Fuel Alerts</p>
+                        <p className="text-xl font-bold text-red-600">
+                          {dashboardData.systemStatus.lowFuelAlerts}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">Below 25% threshold</p>
+                      </div>
+                      <AlertCircle className="h-6 w-6 text-red-500" />
                     </div>
-                    <AlertCircle className="h-8 w-8 text-red-500" />
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
 
-              <Card className="bg-white border-l-4 border-l-green-500">
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-600">Generators Running</p>
-                      <p className="text-2xl font-bold text-green-600">{dashboardData.systemStatus.generatorsRunning}</p>
+                {/* Generators Running */}
+                <Card className="bg-white border-l-4 border-l-green-500">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Generators Running</p>
+                        <p className="text-xl font-bold text-green-600">
+                          {dashboardData.systemStatus.generatorsRunning}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">Currently operational</p>
+                      </div>
+                      <Zap className="h-6 w-6 text-green-500" />
                     </div>
-                    <Zap className="h-8 w-8 text-green-500" />
-                  </div>
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
 
-              <Card className="bg-white border-l-4 border-l-purple-500">
-                <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-600">Total Sites</p>
-                      <p className="text-2xl font-bold text-purple-600">{dashboardData.systemStatus.totalSites}</p>
+                {/* ZESA Running - NEW */}
+                <Card className="bg-white border-l-4 border-l-yellow-500">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">ZESA Running</p>
+                        <p className="text-xl font-bold text-yellow-600">
+                          {dashboardData.systemStatus.zesaRunning}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">Grid power active</p>
+                      </div>
+                      <div className="h-6 w-6 flex items-center justify-center">
+                        <div className="w-4 h-4 bg-yellow-500 rounded-sm flex items-center justify-center">
+                          <Zap className="h-3 w-3 text-white" />
+                        </div>
+                      </div>
                     </div>
-                    <TrendingUp className="h-8 w-8 text-purple-500" />
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          )}
+                  </CardContent>
+                </Card>
+
+                {/* Offline Sites - NEW */}
+                <Card className="bg-white border-l-4 border-l-gray-500">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-600">Offline Sites</p>
+                        <p className="text-xl font-bold text-gray-600">
+                          {dashboardData.systemStatus.offlineSites}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">No recent data</p>
+                      </div>
+                      <div className="h-6 w-6 bg-gray-400 rounded-full flex items-center justify-center">
+                        <div className="w-2 h-2 bg-white rounded-full"></div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
 
           {/* Site Cards */}
           {hasData ? (
