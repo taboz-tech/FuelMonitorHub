@@ -607,56 +607,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let latestReading: any = null;
 
         if (viewMode === 'realtime' && user.role === 'admin') {
-          // Get REAL-TIME data from sensor_readings - FIXED VERSION
+          // Get REAL-TIME data using DISTINCT ON query (FIXED)
           try {
-            console.log(`📈 Getting real-time data for ${site.deviceId}`);
+            console.log(`📈 Getting real-time data for ${site.deviceId} using DISTINCT ON query`);
             
-            // ✅ CORRECT: Get the latest reading for each specific sensor type
-            const sensorTypes = [
-              'fuel_sensor_level', 
-              'fuel_sensor_temp', 
-              'fuel_sensor_volume', 
-              'generator_state', 
-              'zesa_state'
-            ];
+            // Use the exact same query pattern as your working SQL with proper parameterization
+            const sensorResult = await db.execute(sql`
+              SELECT DISTINCT ON (device_id, sensor_name) 
+                time, device_id, sensor_name, value, unit 
+              FROM sensor_readings 
+              WHERE device_id = ${site.deviceId}
+                AND sensor_name IN ('fuel_sensor_level', 'fuel_sensor_temp', 'fuel_sensor_volume', 'generator_state', 'zesa_state')
+              ORDER BY device_id, sensor_name, time DESC
+            `);
             
+            console.log(`📊 Found ${sensorResult.rows.length} distinct sensor readings for ${site.deviceId}`);
+            
+            // Convert results to map for easy lookup
             const sensorMap = new Map();
-            let latestTimestamp = new Date(0); // Start with epoch
+            let latestTimestamp = new Date(0);
             
-            for (const sensorType of sensorTypes) {
-              try {
-                // Query each sensor type individually to get the absolute latest
-                const latestSensorQuery = `
-                  SELECT time, device_id, sensor_name, value, unit
-                  FROM sensor_readings 
-                  WHERE device_id = $1 AND sensor_name = $2
-                  ORDER BY time DESC
-                  LIMIT 1
-                `;
-                
-                const sensorResult = await db.execute(sql`${sql.raw(latestSensorQuery)}`, [site.deviceId, sensorType]);
-                
-                if (sensorResult.rows.length > 0) {
-                  const row = sensorResult.rows[0] as any;
-                  sensorMap.set(sensorType, row);
-                  
-                  // Track the latest timestamp across all sensors
-                  const sensorTime = new Date(row.time);
-                  if (sensorTime > latestTimestamp) {
-                    latestTimestamp = sensorTime;
-                  }
-                  
-                  console.log(`📊 ${site.deviceId} ${sensorType}: ${row.value}${row.unit || ''} at ${row.time}`);
-                } else {
-                  console.log(`⚠️ No data found for ${site.deviceId} ${sensorType}`);
-                }
-              } catch (sensorError) {
-                console.error(`❌ Error getting ${sensorType} for ${site.deviceId}:`, sensorError);
+            for (const row of sensorResult.rows) {
+              const sensorRow = row as any;
+              sensorMap.set(sensorRow.sensor_name, sensorRow);
+              
+              // Track the latest timestamp across all sensors
+              const sensorTime = new Date(sensorRow.time);
+              if (sensorTime > latestTimestamp) {
+                latestTimestamp = sensorTime;
               }
+              
+              console.log(`📊 ${site.deviceId} ${sensorRow.sensor_name}: ${sensorRow.value}${sensorRow.unit || ''} at ${sensorRow.time}`);
             }
 
             if (sensorMap.size > 0) {
-              // Extract sensor values with correct mapping
+              // Extract sensor values with correct mapping using DISTINCT ON results
               const fuelLevelRow = sensorMap.get('fuel_sensor_level');
               const fuelVolumeRow = sensorMap.get('fuel_sensor_volume');
               const tempRow = sensorMap.get('fuel_sensor_temp');
@@ -672,7 +657,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 latestTimestamp: latestTimestamp.toISOString()
               });
 
-              // Create the reading object with EXACT values from sensor_readings
+              // Create the reading object with EXACT values from DISTINCT ON query
               latestReading = {
                 id: 0,
                 siteId: site.id,
@@ -682,11 +667,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 temperature: tempRow ? parseFloat(tempRow.value).toFixed(2) : null,
                 generatorState: generatorRow ? generatorRow.value.toString() : '-1',
                 zesaState: zesaRow ? zesaRow.value.toString() : '-1',
-                capturedAt: latestTimestamp, // This will be the exact timestamp from sensor_readings
+                capturedAt: latestTimestamp, // Latest timestamp from DISTINCT ON query
                 createdAt: new Date(),
               };
             } else {
-              console.log(`⚠️ No real-time readings found for ${site.deviceId}`);
+              console.log(`⚠️ No real-time readings found for ${site.deviceId} using DISTINCT ON query`);
             }
           } catch (error) {
             console.error(`❌ Error getting real-time data for ${site.deviceId}:`, error);
