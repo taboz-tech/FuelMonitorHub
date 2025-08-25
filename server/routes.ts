@@ -946,17 +946,452 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Manual trigger for daily capture (admin only, for testing)
-  app.post("/api/admin/trigger-capture", authenticateToken, requireAdmin, async (req, res) => {
+  // Manual daily closing capture endpoint (admin only)
+  app.post("/api/admin/capture-daily-closing", authenticateToken, requireAdmin, async (req: AuthRequest, res) => {
     try {
-      await scheduler.triggerManualCapture();
-      res.json({ message: "Daily capture triggered successfully" });
+      console.log(`📋 Manual daily closing capture requested by ${req.user?.username}`);
+      
+      const db = getDb();
+      const captureResults = await captureDailyClosingReadings(db);
+      
+      res.json({
+        message: "Daily closing readings captured successfully",
+        timestamp: new Date().toISOString(),
+        results: captureResults
+      });
     } catch (error) {
-      console.error("Trigger capture error:", error);
-      res.status(500).json({ message: "Failed to trigger capture" });
+      console.error("❌ Error in daily closing capture:", error);
+      res.status(500).json({ 
+        message: "Failed to capture daily closing readings",
+        error: error.message 
+      });
     }
   });
 
+  // Enhanced daily closing capture function with proper fuel-focused fallback logic
+  async function captureDailyClosingReadings(db: any) {
+    console.log('🔄 Starting enhanced daily closing capture...');
+
+    // Get all distinct device IDs from sensor_readings table
+    const distinctDevices = await db.execute(sql`
+      SELECT DISTINCT device_id FROM sensor_readings ORDER BY device_id
+    `);
+
+    console.log(`📊 Found ${distinctDevices.rows.length} distinct devices in sensor_readings`);
+
+    const results = {
+      totalDevices: distinctDevices.rows.length,
+      successfulCaptures: 0,
+      failedCaptures: 0,
+      skippedCaptures: 0,
+      captures: [] as any[]
+    };
+
+    for (const deviceRow of distinctDevices.rows) {
+      const deviceId = deviceRow.device_id;
+      
+      try {
+        // Get or create site for this device
+        let site = await db
+          .select()
+          .from(sites)
+          .where(eq(sites.deviceId, deviceId))
+          .limit(1);
+
+        if (site.length === 0) {
+          // Create site if it doesn't exist
+          const newSiteResult = await db
+            .insert(sites)
+            .values({
+              name: deviceId.replace(/^simbisa-/, '').replace(/-/g, ' ').toUpperCase(),
+              location: `Auto-generated location for ${deviceId}`,
+              deviceId: deviceId,
+              fuelCapacity: '2000.00',
+              lowFuelThreshold: '25.00',
+              isActive: true,
+            })
+            .returning();
+
+          site = newSiteResult;
+          console.log(`✅ Created new site for device: ${deviceId}`);
+        }
+
+        const siteData = site[0];
+        
+        // Check if we already have a closing reading for today
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        const existingReading = await db
+          .select()
+          .from(dailyClosingReadings)
+          .where(
+            and(
+              eq(dailyClosingReadings.siteId, siteData.id),
+              sql`${dailyClosingReadings.capturedAt} >= ${today}`,
+              sql`${dailyClosingReadings.capturedAt} < ${tomorrow}`
+            )
+          )
+          .limit(1);
+
+        if (existingReading.length > 0) {
+          console.log(`⏭️ Daily reading already exists for ${deviceId} today, skipping...`);
+          results.skippedCaptures++;
+          results.captures.push({
+            deviceId,
+            status: 'SKIPPED',
+            reason: 'Reading already exists for today',
+            existingCaptureTime: existingReading[0].capturedAt
+          });
+          continue;
+        }
+
+        // Try to capture reading with fallback logic
+        const captureResult = await captureReadingWithFallback(db, siteData, deviceId);
+        
+        if (captureResult.success) {
+          results.successfulCaptures++;
+        } else {
+          results.failedCaptures++;
+        }
+        
+        results.captures.push(captureResult);
+        
+      } catch (error) {
+        console.error(`❌ Error processing device ${deviceId}:`, error);
+        results.failedCaptures++;
+        results.captures.push({
+          deviceId,
+          status: 'ERROR',
+          reason: error.message
+        });
+      }
+    }
+
+    console.log(`🎉 Daily closing capture completed:`, {
+      total: results.totalDevices,
+      successful: results.successfulCaptures,
+      failed: results.failedCaptures,
+      skipped: results.skippedCaptures
+    });
+
+    return results;
+  }
+
+  // Enhanced capture function with proper fuel-focused fallback logic
+  async function captureReadingWithFallback(db: any, siteData: any, deviceId: string) {
+    console.log(`🔍 Capturing reading for site: ${siteData.name} (${deviceId})`);
+
+    try {
+      // Step 1: Try to find readings in the closing window (20:55 to 23:55 today)
+      const now = new Date();
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      // Closing window: 20:55 to 23:55 today
+      const closingStart = new Date(today);
+      closingStart.setHours(20, 55, 0, 0);
+      const closingEnd = new Date(today);
+      closingEnd.setHours(23, 55, 0, 0);
+
+      let captureResult = await findReadingInWindow(db, deviceId, closingStart, closingEnd, 'CLOSING_WINDOW');
+      
+      if (captureResult.readings.length > 0 && typeof captureResult.fuelLevel === 'number') {
+        await saveClosingReading(db, siteData, deviceId, captureResult);
+        return {
+          deviceId,
+          status: 'SUCCESS',
+          method: 'CLOSING_WINDOW',
+          capturedAt: captureResult.capturedAt,
+          fuelLevel: captureResult.fuelLevel,
+          success: true
+        };
+      }
+
+      // Step 2: Try to find readings from anywhere today
+      const dayStart = new Date(today);
+      const dayEnd = new Date(today);
+      dayEnd.setHours(23, 59, 59, 999);
+      
+      captureResult = await findReadingInWindow(db, deviceId, dayStart, dayEnd, 'SAME_DAY');
+      
+      if (captureResult.readings.length > 0 && typeof captureResult.fuelLevel === 'number') {
+        await saveClosingReading(db, siteData, deviceId, captureResult);
+        return {
+          deviceId,
+          status: 'SUCCESS',
+          method: 'SAME_DAY',
+          capturedAt: captureResult.capturedAt,
+          fuelLevel: captureResult.fuelLevel,
+          success: true
+        };
+      }
+
+      // Step 3: Try previous days (up to 7 days back)
+      for (let daysBack = 1; daysBack <= 7; daysBack++) {
+        const lookbackDate = new Date(today);
+        lookbackDate.setDate(lookbackDate.getDate() - daysBack);
+        
+        const lookbackStart = new Date(lookbackDate);
+        lookbackStart.setHours(0, 0, 0, 0);
+        const lookbackEnd = new Date(lookbackDate);
+        lookbackEnd.setHours(23, 59, 59, 999);
+
+        captureResult = await findReadingInWindow(db, deviceId, lookbackStart, lookbackEnd, `PREVIOUS_DAY_${daysBack}`);
+        
+        if (captureResult.readings.length > 0 && typeof captureResult.fuelLevel === 'number') {
+          await saveClosingReading(db, siteData, deviceId, captureResult);
+          return {
+            deviceId,
+            status: 'SUCCESS',
+            method: `PREVIOUS_DAY_${daysBack}`,
+            capturedAt: captureResult.capturedAt,
+            fuelLevel: captureResult.fuelLevel,
+            daysBack: daysBack,
+            success: true
+          };
+        }
+      }
+
+      // Step 4: Get the very last available FUEL reading (no time limit) - THIS IS THE KEY FIX
+      captureResult = await getLastAvailableFuelReading(db, deviceId);
+      
+      if (captureResult.readings.length > 0 && typeof captureResult.fuelLevel === 'number') {
+        await saveClosingReading(db, siteData, deviceId, captureResult);
+        
+        // Calculate how many days ago this reading was
+        const readingDate = new Date(captureResult.capturedAt);
+        const daysAgo = Math.floor((now.getTime() - readingDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        return {
+          deviceId,
+          status: 'SUCCESS',
+          method: 'LAST_AVAILABLE_FUEL',
+          capturedAt: captureResult.capturedAt,
+          fuelLevel: captureResult.fuelLevel,
+          daysOld: daysAgo,
+          warning: `Used fuel reading from ${daysAgo} days ago (${captureResult.capturedAt.toISOString()})`,
+          success: true
+        };
+      }
+
+      // Step 5: No fuel readings found anywhere
+      console.log(`❌ No fuel readings found for device ${deviceId} in the entire database`);
+      return {
+        deviceId,
+        status: 'NO_FUEL_READINGS',
+        reason: 'No fuel sensor readings found in database for this device',
+        success: false
+      };
+
+    } catch (error) {
+      console.error(`❌ Error in fallback capture for ${deviceId}:`, error);
+      return {
+        deviceId,
+        status: 'ERROR',
+        reason: error.message,
+        success: false
+      };
+    }
+  }
+
+  // FIXED: Focused function to get the very last available FUEL reading
+  async function getLastAvailableFuelReading(db: any, deviceId: string) {
+    console.log(`🔍 Getting LAST AVAILABLE FUEL reading for ${deviceId} (no time limit)`);
+
+    // Focus on fuel readings first - get the most recent fuel_level reading
+    const lastFuelReading = await db.execute(sql`
+      SELECT time, device_id, sensor_name, value, unit 
+      FROM sensor_readings 
+      WHERE device_id = ${deviceId}
+        AND sensor_name = 'fuel_sensor_level'
+        AND value IS NOT NULL
+      ORDER BY time DESC
+      LIMIT 1
+    `);
+
+    if (lastFuelReading.rows.length === 0) {
+      console.log(`❌ No fuel_sensor_level readings found for ${deviceId}`);
+      return { readings: [], method: 'LAST_AVAILABLE_FUEL' };
+    }
+
+    const fuelRow = lastFuelReading.rows[0];
+    const fuelTimestamp = new Date(fuelRow.time);
+    
+    console.log(`✅ Found last fuel reading for ${deviceId}:`, {
+      timestamp: fuelTimestamp.toISOString(),
+      fuelLevel: fuelRow.value,
+      daysAgo: Math.floor((new Date().getTime() - fuelTimestamp.getTime()) / (1000 * 60 * 60 * 24))
+    });
+
+    // Now try to get companion readings from around the same time (within 1 hour window)
+    const timeWindow = 60 * 60 * 1000; // 1 hour in milliseconds
+    const windowStart = new Date(fuelTimestamp.getTime() - timeWindow);
+    const windowEnd = new Date(fuelTimestamp.getTime() + timeWindow);
+
+    const companionReadings = await db.execute(sql`
+      SELECT DISTINCT ON (sensor_name) 
+        time, device_id, sensor_name, value, unit 
+      FROM sensor_readings 
+      WHERE device_id = ${deviceId}
+        AND time >= ${windowStart.toISOString()}
+        AND time <= ${windowEnd.toISOString()}
+        AND sensor_name IN ('fuel_sensor_volume', 'fuel_sensor_temp', 'fuel_sensor_temperature', 'generator_state', 'zesa_state')
+        AND value IS NOT NULL
+      ORDER BY sensor_name, time DESC
+    `);
+
+    // Combine fuel reading with companion readings
+    const allReadings = [fuelRow, ...companionReadings.rows];
+    
+    // Convert to map for easy lookup
+    const sensorMap = new Map();
+    for (const row of allReadings) {
+      sensorMap.set(row.sensor_name, row);
+    }
+
+    const fuelLevelRow = sensorMap.get('fuel_sensor_level');
+    const fuelVolumeRow = sensorMap.get('fuel_sensor_volume');
+    const tempRow = sensorMap.get('fuel_sensor_temp') || sensorMap.get('fuel_sensor_temperature');
+    const generatorRow = sensorMap.get('generator_state');
+    const zesaRow = sensorMap.get('zesa_state');
+
+    // CRITICAL: Use the actual timestamp from the fuel level reading
+    const capturedAt = new Date(fuelLevelRow.time);
+
+    console.log(`📊 Assembled reading for ${deviceId}:`, {
+      capturedAt: capturedAt.toISOString(),
+      fuelLevel: `${fuelLevelRow.value} (${typeof parseFloat(fuelLevelRow.value)})`,
+      fuelVolume: fuelVolumeRow?.value || 'N/A',
+      temperature: tempRow?.value || 'N/A',
+      generator: generatorRow?.value || 'unknown',
+      zesa: zesaRow?.value || 'unknown'
+    });
+
+    return {
+      readings: allReadings,
+      method: 'LAST_AVAILABLE_FUEL',
+      capturedAt,
+      fuelLevel: parseFloat(fuelLevelRow.value),
+      fuelVolume: fuelVolumeRow ? parseFloat(fuelVolumeRow.value) : null,
+      temperature: tempRow ? parseFloat(tempRow.value) : null,
+      generatorState: generatorRow ? generatorRow.value.toString() : 'unknown',
+      zesaState: zesaRow ? zesaRow.value.toString() : 'unknown'
+    };
+  }
+
+  // UPDATED: Helper function to find readings in a specific time window - prioritize fuel readings
+  async function findReadingInWindow(db: any, deviceId: string, startTime: Date, endTime: Date, method: string) {
+    console.log(`🔍 Looking for ${method} readings for ${deviceId} between ${startTime.toISOString()} and ${endTime.toISOString()}`);
+
+    // First, check if there are any fuel readings in this window
+    const fuelCheck = await db.execute(sql`
+      SELECT COUNT(*) as count
+      FROM sensor_readings 
+      WHERE device_id = ${deviceId}
+        AND time >= ${startTime.toISOString()}
+        AND time <= ${endTime.toISOString()}
+        AND sensor_name = 'fuel_sensor_level'
+        AND value IS NOT NULL
+    `);
+
+    if (fuelCheck.rows[0].count === 0) {
+      console.log(`⚠️ No fuel readings found in ${method} window for ${deviceId}`);
+      return { readings: [], method };
+    }
+
+    // Get the latest readings for each sensor type in the time window
+    const sensorReadings = await db.execute(sql`
+      SELECT DISTINCT ON (device_id, sensor_name) 
+        time, device_id, sensor_name, value, unit 
+      FROM sensor_readings 
+      WHERE device_id = ${deviceId}
+        AND time >= ${startTime.toISOString()}
+        AND time <= ${endTime.toISOString()}
+        AND sensor_name IN ('fuel_sensor_level', 'fuel_sensor_volume', 'fuel_sensor_temp', 'fuel_sensor_temperature', 'generator_state', 'zesa_state')
+        AND value IS NOT NULL
+      ORDER BY device_id, sensor_name, time DESC
+    `);
+
+    if (sensorReadings.rows.length === 0) {
+      return { readings: [], method };
+    }
+
+    console.log(`📊 Found ${sensorReadings.rows.length} sensor readings for ${deviceId} using ${method}`);
+
+    // Convert to map for easy lookup
+    const sensorMap = new Map();
+    let latestFuelTime = new Date(0); // Track latest fuel sensor time
+
+    for (const row of sensorReadings.rows) {
+      sensorMap.set(row.sensor_name, row);
+      
+      // Track the latest fuel sensor time as the primary timestamp
+      if (row.sensor_name === 'fuel_sensor_level') {
+        const readingTime = new Date(row.time);
+        if (readingTime > latestFuelTime) {
+          latestFuelTime = readingTime;
+        }
+      }
+    }
+
+    // Extract sensor values
+    const fuelLevelRow = sensorMap.get('fuel_sensor_level');
+    const fuelVolumeRow = sensorMap.get('fuel_sensor_volume');
+    const tempRow = sensorMap.get('fuel_sensor_temp') || sensorMap.get('fuel_sensor_temperature');
+    const generatorRow = sensorMap.get('generator_state');
+    const zesaRow = sensorMap.get('zesa_state');
+
+    // Use the original timestamp from the fuel level sensor
+    const capturedAt = fuelLevelRow ? new Date(fuelLevelRow.time) : latestFuelTime;
+
+    return {
+      readings: sensorReadings.rows,
+      method,
+      capturedAt,
+      fuelLevel: fuelLevelRow ? parseFloat(fuelLevelRow.value) : null,
+      fuelVolume: fuelVolumeRow ? parseFloat(fuelVolumeRow.value) : null,
+      temperature: tempRow ? parseFloat(tempRow.value) : null,
+      generatorState: generatorRow ? generatorRow.value.toString() : 'unknown',
+      zesaState: zesaRow ? zesaRow.value.toString() : 'unknown'
+    };
+  }
+
+  // UPDATED: Helper function to save the closing reading with better logging
+  async function saveClosingReading(db: any, siteData: any, deviceId: string, captureResult: any) {
+    // Use the original timestamp from the sensor reading
+    const originalTimestamp = captureResult.capturedAt;
+
+    const insertData = {
+      siteId: siteData.id,
+      deviceId: deviceId,
+      fuelLevel: typeof captureResult.fuelLevel === 'number' ? captureResult.fuelLevel.toFixed(2) : null,
+      fuelVolume: typeof captureResult.fuelVolume === 'number' ? captureResult.fuelVolume.toFixed(2) : null,
+      temperature: captureResult.temperature ? captureResult.temperature.toFixed(2) : null,
+      generatorState: captureResult.generatorState || 'unknown',
+      zesaState: captureResult.zesaState || 'unknown',
+      capturedAt: originalTimestamp, // CRITICAL: Use original sensor timestamp, not current time
+    };
+
+    await db.insert(dailyClosingReadings).values(insertData);
+
+    const daysAgo = Math.floor((new Date().getTime() - originalTimestamp.getTime()) / (1000 * 60 * 60 * 24));
+
+    console.log(`✅ Daily reading saved for ${siteData.name}:`, {
+      fuel: insertData.fuelLevel ? `${insertData.fuelLevel}%` : 'N/A',
+      volume: insertData.fuelVolume ? `${insertData.fuelVolume}L` : 'N/A',
+      temp: insertData.temperature ? `${insertData.temperature}°C` : 'N/A',
+      generator: insertData.generatorState,
+      zesa: insertData.zesaState,
+      originalTimestamp: originalTimestamp.toISOString(),
+      method: captureResult.method,
+      daysOld: daysAgo > 0 ? `${daysAgo} days ago` : 'today'
+    });
+  }
+
+  
   const httpServer = createServer(app);
   return httpServer;
 }
