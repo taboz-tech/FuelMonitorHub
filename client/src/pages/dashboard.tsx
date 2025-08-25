@@ -5,11 +5,9 @@ import { useAuth } from "@/hooks/use-auth";
 import Header from "@/components/layout/header";
 import Sidebar from "@/components/layout/sidebar";
 import SiteCard from "@/components/dashboard/site-card";
-import StatusOverview from "@/components/dashboard/status-overview";
-import ActivityTable from "@/components/dashboard/activity-table";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { RefreshCw, TrendingUp, AlertCircle, CheckCircle, Zap } from "lucide-react";
+import { RefreshCw, AlertCircle, CheckCircle, Zap } from "lucide-react";
 import { type DashboardData } from "@shared/schema";
 
 export default function Dashboard() {
@@ -102,8 +100,8 @@ export default function Dashboard() {
                 <div className="h-8 bg-gray-200 rounded w-1/4"></div>
                 <div className="h-10 bg-gray-200 rounded w-32"></div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                {[1, 2, 3, 4].map((i) => (
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                {[1, 2, 3, 4, 5].map((i) => (
                   <div key={i} className="h-32 bg-gray-200 rounded-xl"></div>
                 ))}
               </div>
@@ -160,6 +158,8 @@ export default function Dashboard() {
     viewMode: dashboardData?.viewMode,
     user: user?.username
   });
+
+
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -220,95 +220,95 @@ export default function Dashboard() {
           )}
 
           {/* Enhanced System Status Cards - 5 Cards */}
-            {dashboardData?.systemStatus && (
-              <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
-                {/* Sites Online */}
-                <Card className="bg-white border-l-4 border-l-blue-500">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-gray-600">Sites Online</p>
-                        <p className="text-xl font-bold text-blue-600">
-                          {dashboardData.systemStatus.sitesOnline}/{dashboardData.systemStatus.totalSites}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">Active & reporting</p>
-                      </div>
-                      <CheckCircle className="h-6 w-6 text-blue-500" />
+          {dashboardData?.systemStatus && (
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+              {/* Sites Online */}
+              <Card className="bg-white border-l-4 border-l-blue-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Sites Online</p>
+                      <p className="text-xl font-bold text-blue-600">
+                        {dashboardData.systemStatus.sitesOnline}/{dashboardData.systemStatus.totalSites}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">Active & reporting</p>
                     </div>
-                  </CardContent>
-                </Card>
+                    <CheckCircle className="h-6 w-6 text-blue-500" />
+                  </div>
+                </CardContent>
+              </Card>
 
-                {/* Low Fuel Alerts */}
-                <Card className="bg-white border-l-4 border-l-red-500">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-gray-600">Low Fuel Alerts</p>
-                        <p className="text-xl font-bold text-red-600">
-                          {dashboardData.systemStatus.lowFuelAlerts}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">Below 25% threshold</p>
-                      </div>
-                      <AlertCircle className="h-6 w-6 text-red-500" />
+              {/* Low Fuel Alerts */}
+              <Card className="bg-white border-l-4 border-l-red-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Low Fuel Alerts</p>
+                      <p className="text-xl font-bold text-red-600">
+                        {dashboardData.systemStatus.lowFuelAlerts}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">Below 25% threshold</p>
                     </div>
-                  </CardContent>
-                </Card>
+                    <AlertCircle className="h-6 w-6 text-red-500" />
+                  </div>
+                </CardContent>
+              </Card>
 
-                {/* Generators Running */}
-                <Card className="bg-white border-l-4 border-l-green-500">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-gray-600">Generators Running</p>
-                        <p className="text-xl font-bold text-green-600">
-                          {dashboardData.systemStatus.generatorsRunning}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">Currently operational</p>
-                      </div>
-                      <Zap className="h-6 w-6 text-green-500" />
+              {/* Generators Running */}
+              <Card className="bg-white border-l-4 border-l-green-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Generators Running</p>
+                      <p className="text-xl font-bold text-green-600">
+                        {dashboardData.systemStatus.generatorsRunning}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">Currently operational</p>
                     </div>
-                  </CardContent>
-                </Card>
+                    <Zap className="h-6 w-6 text-green-500" />
+                  </div>
+                </CardContent>
+              </Card>
 
-                {/* ZESA Running - NEW */}
-                <Card className="bg-white border-l-4 border-l-yellow-500">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-gray-600">ZESA Running</p>
-                        <p className="text-xl font-bold text-yellow-600">
-                          {dashboardData.systemStatus.zesaRunning}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">Grid power active</p>
-                      </div>
-                      <div className="h-6 w-6 flex items-center justify-center">
-                        <div className="w-4 h-4 bg-yellow-500 rounded-sm flex items-center justify-center">
-                          <Zap className="h-3 w-3 text-white" />
-                        </div>
+              {/* ZESA Running */}
+              <Card className="bg-white border-l-4 border-l-yellow-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">ZESA Running</p>
+                      <p className="text-xl font-bold text-yellow-600">
+                        {dashboardData.systemStatus.zesaRunning}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">Grid power active</p>
+                    </div>
+                    <div className="h-6 w-6 flex items-center justify-center">
+                      <div className="w-4 h-4 bg-yellow-500 rounded-sm flex items-center justify-center">
+                        <Zap className="h-3 w-3 text-white" />
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                </CardContent>
+              </Card>
 
-                {/* Offline Sites - NEW */}
-                <Card className="bg-white border-l-4 border-l-gray-500">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-gray-600">Offline Sites</p>
-                        <p className="text-xl font-bold text-gray-600">
-                          {dashboardData.systemStatus.offlineSites}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">No recent data</p>
-                      </div>
-                      <div className="h-6 w-6 bg-gray-400 rounded-full flex items-center justify-center">
-                        <div className="w-2 h-2 bg-white rounded-full"></div>
-                      </div>
+              {/* Offline Sites */}
+              <Card className="bg-white border-l-4 border-l-gray-500">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600">Offline Sites</p>
+                      <p className="text-xl font-bold text-gray-600">
+                        {dashboardData.systemStatus.offlineSites}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">No recent data</p>
                     </div>
-                  </CardContent>
-                </Card>
-              </div>
-            )}
+                    <div className="h-6 w-6 bg-gray-400 rounded-full flex items-center justify-center">
+                      <div className="w-2 h-2 bg-white rounded-full"></div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
 
           {/* Site Cards */}
           {hasData ? (
@@ -342,44 +342,7 @@ export default function Dashboard() {
             </Card>
           )}
 
-          {/* Charts Section */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-            {/* Fuel Consumption Trend Chart */}
-            <Card className="bg-white">
-              <CardHeader className="border-b border-gray-200">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg font-semibold text-gray-900">
-                    Fuel Consumption Trend
-                  </CardTitle>
-                  <select className="text-sm border border-gray-300 rounded-lg px-3 py-1 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                    <option value="7">Last 7 Days</option>
-                    <option value="30">Last 30 Days</option>
-                    <option value="90">Last 3 Months</option>
-                  </select>
-                </div>
-              </CardHeader>
-              
-              <CardContent className="p-6">
-                <div className="h-64 bg-gray-50 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-300">
-                  <div className="text-center">
-                    <TrendingUp className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                    <p className="text-gray-500 font-medium">Fuel consumption chart</p>
-                    <p className="text-xs text-gray-400 mt-1">Chart integration ready</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
 
-            {/* System Status Overview */}
-            {dashboardData?.systemStatus && (
-              <StatusOverview systemStatus={dashboardData.systemStatus} />
-            )}
-          </div>
-
-          {/* Recent Activity Table */}
-          {dashboardData?.recentActivity && dashboardData.recentActivity.length > 0 && (
-            <ActivityTable activities={dashboardData.recentActivity} />
-          )}
 
           {/* Debug Information (only in development) */}
           {process.env.NODE_ENV === 'development' && debugInfo && (
