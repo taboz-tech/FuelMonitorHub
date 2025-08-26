@@ -57,6 +57,29 @@ export const adminPreferences = pgTable("admin_preferences", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Cumulative daily readings table
+export const cumulativeReadings = pgTable("cumulative_readings", {
+  id: serial("id").primaryKey(),
+  siteId: integer("site_id").notNull().references(() => sites.id),
+  deviceId: text("device_id").notNull(),
+  date: text("date").notNull(), // YYYY-MM-DD format
+  
+  // Fuel metrics
+  totalFuelConsumed: decimal("total_fuel_consumed", { precision: 10, scale: 2 }).default("0"), // in liters
+  totalFuelToppedup: decimal("total_fuel_topped_up", { precision: 10, scale: 2 }).default("0"), // in liters
+  fuelConsumedPercent: decimal("fuel_consumed_percent", { precision: 5, scale: 2 }).default("0"), // percentage
+  fuelToppedupPercent: decimal("fuel_topped_up_percent", { precision: 5, scale: 2 }).default("0"), // percentage
+  
+  // Runtime metrics
+  totalGeneratorRuntime: decimal("total_generator_runtime", { precision: 10, scale: 2 }).default("0"), // in hours
+  totalZesaRuntime: decimal("total_zesa_runtime", { precision: 10, scale: 2 }).default("0"), // in hours
+  totalOfflineTime: decimal("total_offline_time", { precision: 10, scale: 2 }).default("0"), // in hours
+  
+  // Metadata
+  calculatedAt: timestamp("calculated_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Sensor readings (reference to existing external table structure)
 export const sensorReadings = pgTable("sensor_readings", {
   time: timestamp("time").notNull(),
@@ -174,3 +197,6 @@ export const updateUserSchema = z.object({
 // Export types for the forms
 export type CreateUserRequest = z.infer<typeof createUserSchema>;
 export type UpdateUserRequest = z.infer<typeof updateUserSchema>;
+
+export type CumulativeReading = typeof cumulativeReadings.$inferSelect;
+export type InsertCumulativeReading = typeof cumulativeReadings.$inferInsert;

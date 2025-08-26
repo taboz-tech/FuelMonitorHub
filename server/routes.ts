@@ -23,6 +23,7 @@ import {
   insertUserSchema,
   insertSiteSchema,
   updateViewModeSchema,
+  cumulativeReadings,
   type User,
   type DashboardData,
   type SiteWithReadings,
@@ -30,6 +31,7 @@ import {
 } from "@shared/schema";
 import { eq, desc, and, inArray, sql, gte } from "drizzle-orm";
 import { ne } from "drizzle-orm";
+import { CumulativeCalculator } from "./cumulative-calculator";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize database connection and scheduler
@@ -699,6 +701,330 @@ export async function registerRoutes(app: Express): Promise<Server> {
         recentActivity: [],
         viewMode: 'closing'
       });
+    }
+  });
+
+  // Cumulative readings endpoint - processes daily fuel and power consumption
+  app.post("/api/cumulative-readings", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { date } = req.body; // Optional date in format: DD/MM/YYYY or YYYY-MM-DD
+      const user = req.user!;
+      
+      // Parse target date
+      let targetDate: Date;
+      if (date) {
+        // Handle both DD/MM/YYYY and YYYY-MM-DD formats
+        if (date.includes('/')) {
+          const [day, month, year] = date.split('/');
+          targetDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+        } else {
+          targetDate = new Date(date);
+        }
+        
+        // Validate date
+        if (isNaN(targetDate.getTime())) {
+          return res.status(400).json({ message: "Invalid date format. Use DD/MM/YYYY or YYYY-MM-DD" });
+        }
+      } else {
+        // Use current date if no date provided
+        targetDate = new Date();
+        // Reset to start of day for consistent behavior
+        targetDate.setHours(0, 0, 0, 0);
+      }
+      
+      const dateString = targetDate.toISOString().split('T')[0]; // YYYY-MM-DD
+      
+      console.log(`Processing cumulative readings for ${dateString} requested by ${user.username}`);
+      
+      const db = getDb();
+      
+      // Get user's accessible sites
+      let userSites = [];
+      
+      if (user.role === 'admin') {
+        userSites = await db
+          .select()
+          .from(sites)
+          .where(eq(sites.isActive, true));
+      } else {
+        const assignedSiteIds = await db
+          .select({ siteId: userSiteAssignments.siteId })
+          .from(userSiteAssignments)
+          .where(eq(userSiteAssignments.userId, user.id));
+
+        if (assignedSiteIds.length === 0) {
+          return res.json({
+            date: dateString,
+            sites: [],
+            summary: {
+              totalSites: 0,
+              processedSites: 0,
+              totalFuelConsumed: 0,
+              totalFuelTopped: 0,
+              totalGeneratorHours: 0,
+              totalZesaHours: 0
+            }
+          });
+        }
+
+        userSites = await db
+          .select()
+          .from(sites)
+          .where(
+            and(
+              eq(sites.isActive, true),
+              inArray(sites.id, assignedSiteIds.map(a => a.siteId))
+            )
+          );
+      }
+      
+      console.log(`Processing ${userSites.length} sites for date ${dateString}`);
+      
+      const results = [];
+      let totalFuelConsumed = 0;
+      let totalFuelTopped = 0;
+      let totalGeneratorHours = 0;
+      let totalZesaHours = 0;
+      let processedSites = 0;
+      
+      for (const site of userSites) {
+        try {
+          console.log(`Processing site: ${site.name} (${site.deviceId})`);
+          
+          // Check if we already have data for this site and date
+          const existingReading = await db
+            .select()
+            .from(cumulativeReadings)
+            .where(
+              and(
+                eq(cumulativeReadings.siteId, site.id),
+                eq(cumulativeReadings.date, dateString)
+              )
+            )
+            .limit(1);
+          
+          let siteResult;
+          
+          if (existingReading.length > 0) {
+            // Update existing record (overwrite logic as requested)
+            console.log(`Updating existing cumulative reading for ${site.name}`);
+            
+            const [fuelMetrics, powerMetrics] = await Promise.all([
+              CumulativeCalculator.calculateFuelChanges(db, site.deviceId, targetDate),
+              CumulativeCalculator.calculatePowerRuntimes(db, site.deviceId, targetDate)
+            ]);
+            
+            const updateData = {
+              totalFuelConsumed: fuelMetrics.totalFuelConsumed.toString(),
+              totalFuelToppedup: fuelMetrics.totalFuelToppedup.toString(),
+              fuelConsumedPercent: fuelMetrics.fuelConsumedPercent.toString(),
+              fuelToppedupPercent: fuelMetrics.fuelToppedupPercent.toString(),
+              totalGeneratorRuntime: powerMetrics.totalGeneratorRuntime.toString(),
+              totalZesaRuntime: powerMetrics.totalZesaRuntime.toString(),
+              totalOfflineTime: powerMetrics.totalOfflineTime.toString(),
+              calculatedAt: new Date(),
+            };
+            
+            await db
+              .update(cumulativeReadings)
+              .set(updateData)
+              .where(eq(cumulativeReadings.id, existingReading[0].id));
+            
+            siteResult = {
+              ...existingReading[0],
+              ...updateData,
+              siteName: site.name,
+              status: 'UPDATED'
+            };
+            
+          } else {
+            // Create new record
+            console.log(`Creating new cumulative reading for ${site.name}`);
+            
+            const [fuelMetrics, powerMetrics] = await Promise.all([
+              CumulativeCalculator.calculateFuelChanges(db, site.deviceId, targetDate),
+              CumulativeCalculator.calculatePowerRuntimes(db, site.deviceId, targetDate)
+            ]);
+            
+            const insertData = {
+              siteId: site.id,
+              deviceId: site.deviceId,
+              date: dateString,
+              totalFuelConsumed: fuelMetrics.totalFuelConsumed.toString(),
+              totalFuelToppedup: fuelMetrics.totalFuelToppedup.toString(),
+              fuelConsumedPercent: fuelMetrics.fuelConsumedPercent.toString(),
+              fuelToppedupPercent: fuelMetrics.fuelToppedupPercent.toString(),
+              totalGeneratorRuntime: powerMetrics.totalGeneratorRuntime.toString(),
+              totalZesaRuntime: powerMetrics.totalZesaRuntime.toString(),
+              totalOfflineTime: powerMetrics.totalOfflineTime.toString(),
+              calculatedAt: new Date(),
+            };
+            
+            const newReading = await db
+              .insert(cumulativeReadings)
+              .values(insertData)
+              .returning();
+            
+            siteResult = {
+              ...newReading[0],
+              siteName: site.name,
+              status: 'CREATED'
+            };
+          }
+          
+          // Add to results and totals
+          results.push({
+            siteId: site.id,
+            siteName: site.name,
+            deviceId: site.deviceId,
+            fuelConsumed: parseFloat(siteResult.totalFuelConsumed) || 0,
+            fuelTopped: parseFloat(siteResult.totalFuelToppedup) || 0,
+            fuelConsumedPercent: parseFloat(siteResult.fuelConsumedPercent) || 0,
+            fuelToppedPercent: parseFloat(siteResult.fuelToppedupPercent) || 0,
+            generatorHours: parseFloat(siteResult.totalGeneratorRuntime) || 0,
+            zesaHours: parseFloat(siteResult.totalZesaRuntime) || 0,
+            offlineHours: parseFloat(siteResult.totalOfflineTime) || 0,
+            status: siteResult.status,
+            calculatedAt: siteResult.calculatedAt
+          });
+          
+          totalFuelConsumed += parseFloat(siteResult.totalFuelConsumed) || 0;
+          totalFuelTopped += parseFloat(siteResult.totalFuelToppedup) || 0;
+          totalGeneratorHours += parseFloat(siteResult.totalGeneratorRuntime) || 0;
+          totalZesaHours += parseFloat(siteResult.totalZesaRuntime) || 0;
+          processedSites++;
+          
+          console.log(`Successfully processed ${site.name}: Fuel consumed: ${siteResult.totalFuelConsumed}L, Generator: ${siteResult.totalGeneratorRuntime}h`);
+          
+        } catch (siteError) {
+          console.error(`Error processing site ${site.name}:`, siteError);
+          
+          results.push({
+            siteId: site.id,
+            siteName: site.name,
+            deviceId: site.deviceId,
+            error: siteError.message,
+            status: 'ERROR'
+          });
+        }
+      }
+      
+      // Sort results by fuel consumed (highest first)
+      results.sort((a, b) => (b.fuelConsumed || 0) - (a.fuelConsumed || 0));
+      
+      const response = {
+        date: dateString,
+        processedAt: new Date().toISOString(),
+        user: {
+          username: user.username,
+          role: user.role
+        },
+        sites: results,
+        summary: {
+          totalSites: userSites.length,
+          processedSites: processedSites,
+          errorSites: results.filter(r => r.status === 'ERROR').length,
+          totalFuelConsumed: Math.round(totalFuelConsumed * 10) / 10,
+          totalFuelTopped: Math.round(totalFuelTopped * 10) / 10,
+          totalGeneratorHours: Math.round(totalGeneratorHours * 100) / 100,
+          totalZesaHours: Math.round(totalZesaHours * 100) / 100,
+          totalOfflineHours: Math.round((results.reduce((sum, r) => sum + (r.offlineHours || 0), 0)) * 100) / 100
+        }
+      };
+      
+      console.log(`Cumulative readings completed for ${dateString}:`, {
+        totalSites: userSites.length,
+        processed: processedSites,
+        errors: response.summary.errorSites,
+        totalFuelConsumed: response.summary.totalFuelConsumed,
+        totalGeneratorHours: response.summary.totalGeneratorHours
+      });
+      
+      res.json(response);
+      
+    } catch (error) {
+      console.error("Cumulative readings error:", error);
+      res.status(500).json({ 
+        message: "Failed to process cumulative readings",
+        error: error.message 
+      });
+    }
+  });
+
+  // Get cumulative readings for a date range (optional endpoint for viewing historical data)
+  app.get("/api/cumulative-readings", authenticateToken, async (req: AuthRequest, res) => {
+    try {
+      const { startDate, endDate, siteId } = req.query;
+      const user = req.user!;
+      const db = getDb();
+      
+      let query = db.select({
+        id: cumulativeReadings.id,
+        siteId: cumulativeReadings.siteId,
+        deviceId: cumulativeReadings.deviceId,
+        date: cumulativeReadings.date,
+        totalFuelConsumed: cumulativeReadings.totalFuelConsumed,
+        totalFuelToppedup: cumulativeReadings.totalFuelToppedup,
+        fuelConsumedPercent: cumulativeReadings.fuelConsumedPercent,
+        fuelToppedupPercent: cumulativeReadings.fuelToppedupPercent,
+        totalGeneratorRuntime: cumulativeReadings.totalGeneratorRuntime,
+        totalZesaRuntime: cumulativeReadings.totalZesaRuntime,
+        totalOfflineTime: cumulativeReadings.totalOfflineTime,
+        calculatedAt: cumulativeReadings.calculatedAt,
+        siteName: sites.name
+      })
+      .from(cumulativeReadings)
+      .innerJoin(sites, eq(sites.id, cumulativeReadings.siteId));
+      
+      // Apply filters
+      const conditions = [];
+      
+      if (startDate) {
+        conditions.push(sql`${cumulativeReadings.date} >= ${startDate}`);
+      }
+      
+      if (endDate) {
+        conditions.push(sql`${cumulativeReadings.date} <= ${endDate}`);
+      }
+      
+      if (siteId) {
+        conditions.push(eq(cumulativeReadings.siteId, parseInt(siteId as string)));
+      }
+      
+      // Role-based access control
+      if (user.role !== 'admin') {
+        const assignedSiteIds = await db
+          .select({ siteId: userSiteAssignments.siteId })
+          .from(userSiteAssignments)
+          .where(eq(userSiteAssignments.userId, user.id));
+        
+        if (assignedSiteIds.length > 0) {
+          conditions.push(inArray(cumulativeReadings.siteId, assignedSiteIds.map(a => a.siteId)));
+        } else {
+          return res.json({ readings: [], summary: { totalReadings: 0 } });
+        }
+      }
+      
+      if (conditions.length > 0) {
+        query = query.where(and(...conditions));
+      }
+      
+      const readings = await query.orderBy(desc(cumulativeReadings.date), desc(cumulativeReadings.calculatedAt));
+      
+      res.json({
+        readings: readings,
+        summary: {
+          totalReadings: readings.length,
+          dateRange: {
+            start: startDate || 'All',
+            end: endDate || 'All'
+          }
+        }
+      });
+      
+    } catch (error) {
+      console.error("Get cumulative readings error:", error);
+      res.status(500).json({ message: "Failed to retrieve cumulative readings" });
     }
   });
 

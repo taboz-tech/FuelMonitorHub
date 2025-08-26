@@ -198,6 +198,23 @@ class DatabaseConnection {
         UNIQUE(user_id)
       );
 
+      CREATE TABLE IF NOT EXISTS cumulative_readings (
+        id SERIAL PRIMARY KEY,
+        site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+        device_id TEXT NOT NULL,
+        date TEXT NOT NULL,
+        total_fuel_consumed DECIMAL(10,2) DEFAULT 0,
+        total_fuel_topped_up DECIMAL(10,2) DEFAULT 0,
+        fuel_consumed_percent DECIMAL(5,2) DEFAULT 0,
+        fuel_topped_up_percent DECIMAL(5,2) DEFAULT 0,
+        total_generator_runtime DECIMAL(10,2) DEFAULT 0,
+        total_zesa_runtime DECIMAL(10,2) DEFAULT 0,
+        total_offline_time DECIMAL(10,2) DEFAULT 0,
+        calculated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE(site_id, date)
+      );
+
       INSERT INTO users (username, email, password, role, full_name)
       VALUES ('admin', 'admin@fuelmonitor.com', '$2b$10$.XgW4LNBHnMqCnGczUy5/etAp/KCsAYtTexha2Nn5toSsU.2ai6v.', 'admin', 'System Administrator')
       ON CONFLICT (username) DO NOTHING;
