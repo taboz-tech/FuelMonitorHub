@@ -85,24 +85,38 @@ interface HistoricalReading {
 }
 
 export default function Analytics() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
 
   // State management
   const [activeTab, setActiveTab] = useState("daily");
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [dateRange, setDateRange] = useState({
-    startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    endDate: new Date().toISOString().split('T')[0]
+  const [dateRange, setDateRange] = useState(() => {
+    const today = new Date().toISOString().split('T')[0];
+    return {
+      startDate: today, // Default to today only
+      endDate: today
+    };
   });
   const [processingDate, setProcessingDate] = useState("");
 
+  // Debug logging for auth states - same as dashboard
+  console.log("🔍 Analytics render state:", {
+    authLoading,
+    isAuthenticated,
+    hasUser: !!user,
+    username: user?.username
+  });
+
+  // Wait for auth to complete before redirecting - SAME AS DASHBOARD
   useEffect(() => {
-    if (!isAuthenticated) {
+    // Only redirect if auth is not loading and user is not authenticated
+    if (!authLoading && !isAuthenticated) {
+      console.log("🚪 Redirecting to login - auth completed, user not authenticated");
       setLocation("/login");
     }
-  }, [isAuthenticated, setLocation]);
+  }, [authLoading, isAuthenticated, setLocation]);
 
   // Process cumulative readings mutation
   const processCumulativeMutation = useMutation({
@@ -128,7 +142,7 @@ export default function Analytics() {
     },
   });
 
-  // Get historical readings
+  // Get historical readings - FIXED: Only run when authenticated
   const { data: historicalData, isLoading: historicalLoading, error: historicalError } = useQuery<{
     readings: HistoricalReading[];
     summary: { totalReadings: number };
@@ -142,8 +156,50 @@ export default function Analytics() {
       const response = await apiRequest("GET", `/api/cumulative-readings?${params}`);
       return response.json();
     },
-    enabled: isAuthenticated,
+    enabled: !authLoading && isAuthenticated, // FIXED: Same as dashboard
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    staleTime: 30000, // 30 seconds
   });
+
+  // Show loading spinner while auth is loading - SAME AS DASHBOARD
+  if (authLoading) {
+    console.log("⏳ Auth still loading, showing auth spinner");
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <h2 className="text-lg font-semibold text-gray-700">Checking authentication...</h2>
+          <p className="text-gray-500">Please wait</p>
+        </div>
+      </div>
+    );
+  }
+
+  // If auth completed but user is not authenticated, show nothing (redirect will happen)
+  if (!authLoading && !isAuthenticated) {
+    console.log("🚫 Auth completed, user not authenticated - should redirect");
+    return null;
+  }
+
+  // If user is not available yet, show error - SAME AS DASHBOARD
+  if (!user) {
+    console.log("❌ Authenticated but no user object");
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Card className="max-w-md">
+          <CardContent className="pt-6 text-center">
+            <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">Authentication Error</h2>
+            <p className="text-gray-600 mb-4">User information not available</p>
+            <Button onClick={() => window.location.reload()}>
+              Reload Page
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   // Process readings for current date
   const handleProcessToday = () => {
@@ -161,6 +217,26 @@ export default function Analytics() {
       return;
     }
     processCumulativeMutation.mutate(processingDate);
+  };
+
+  // FIXED: Set date range to today
+  const handleSetToday = () => {
+    const today = new Date().toISOString().split('T')[0];
+    setDateRange({ startDate: today, endDate: today });
+  };
+
+  // FIXED: Set date range to last 7 days  
+  const handleSetLast7Days = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    setDateRange({ startDate: weekAgo, endDate: today });
+  };
+
+  // FIXED: Set date range to last 30 days
+  const handleSetLast30Days = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    setDateRange({ startDate: monthAgo, endDate: today });
   };
 
   // Prepare chart data
@@ -237,10 +313,6 @@ export default function Analytics() {
     ];
   };
 
-  if (!isAuthenticated) {
-    return null;
-  }
-
   const dailyChartData = prepareDailyChartData();
   const siteComparisonData = prepareSiteComparisonData();
   const powerDistributionData = preparePowerDistributionData();
@@ -259,9 +331,18 @@ export default function Analytics() {
                   <BarChart3 className="h-8 w-8 text-primary" />
                   Analytics & Reports
                 </h2>
-                <p className="text-gray-600 mt-2">
-                  Comprehensive fuel consumption and power usage analytics
-                </p>
+                <div className="flex items-center mt-2 space-x-4">
+                  <p className="text-gray-600">
+                    Welcome back, {user.fullName} ({user.role})
+                  </p>
+                  <p className="text-gray-500">
+                    Comprehensive fuel consumption and power usage analytics
+                  </p>
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    <CheckCircle className="w-3 h-3 mr-1" />
+                    Last updated: {new Date().toLocaleTimeString()}
+                  </span>
+                </div>
               </div>
               
               <div className="flex items-center space-x-3">
@@ -297,10 +378,10 @@ export default function Analytics() {
             </div>
           </div>
 
-          {/* Filters */}
+          {/* FIXED: Filters with Today button first */}
           <Card className="mb-6">
             <CardContent className="p-4">
-              <div className="flex items-center space-x-4">
+              <div className="flex items-center space-x-4 flex-wrap">
                 <Filter className="h-5 w-5 text-gray-500" />
                 <div className="flex items-center space-x-2">
                   <Label>From:</Label>
@@ -320,23 +401,28 @@ export default function Analytics() {
                     className="w-40"
                   />
                 </div>
+                
+                {/* FIXED: Today button first, then Last 7 Days */}
                 <Button
-                  onClick={() => {
-                    const today = new Date().toISOString().split('T')[0];
-                    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                    setDateRange({ startDate: weekAgo, endDate: today });
-                  }}
+                  onClick={handleSetToday}
+                  variant="outline"
+                  size="sm"
+                  className={dateRange.startDate === dateRange.endDate && 
+                    dateRange.startDate === new Date().toISOString().split('T')[0] ? 
+                    'bg-blue-100 text-blue-700 border-blue-300' : ''}
+                >
+                  Today
+                </Button>
+                
+                <Button
+                  onClick={handleSetLast7Days}
                   variant="outline"
                   size="sm"
                 >
                   Last 7 Days
                 </Button>
                 <Button
-                  onClick={() => {
-                    const today = new Date().toISOString().split('T')[0];
-                    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-                    setDateRange({ startDate: monthAgo, endDate: today });
-                  }}
+                  onClick={handleSetLast30Days}
                   variant="outline"
                   size="sm"
                 >
@@ -345,6 +431,34 @@ export default function Analytics() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Show loading while fetching data */}
+          {historicalLoading && (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <RefreshCw className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold text-gray-700">Loading Analytics Data...</h3>
+                <p className="text-gray-500">Fetching cumulative readings and reports</p>
+              </div>
+            </div>
+          )}
+
+          {/* Show error state */}
+          {historicalError && (
+            <Card className="mb-6">
+              <CardContent className="p-6 text-center">
+                <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">Failed to Load Analytics Data</h3>
+                <p className="text-gray-600 mb-4">{historicalError.message}</p>
+                <Button 
+                  onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/cumulative-readings"] })}
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Retry Loading
+                </Button>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Summary Cards */}
           {historicalData && (
@@ -612,6 +726,20 @@ export default function Analytics() {
                       {historicalData?.readings && historicalData.readings.length > 50 && (
                         <div className="text-center py-4 text-gray-500">
                           Showing first 50 of {historicalData.readings.length} records
+                        </div>
+                      )}
+
+                      {historicalData?.readings.length === 0 && (
+                        <div className="text-center py-8 text-gray-500">
+                          <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                          <h3 className="text-lg font-medium text-gray-900 mb-2">No Data Available</h3>
+                          <p className="text-gray-600 mb-4">
+                            No cumulative readings found for the selected date range.
+                          </p>
+                          <Button onClick={handleProcessToday}>
+                            <CheckCircle className="w-4 h-4 mr-2" />
+                            Process Today's Data
+                          </Button>
                         </div>
                       )}
                     </div>
