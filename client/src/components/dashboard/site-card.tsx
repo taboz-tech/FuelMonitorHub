@@ -10,12 +10,14 @@ interface SiteCardProps {
 
 export default function SiteCard({ site }: SiteCardProps) {
   const getFuelLevelColor = (percentage: number) => {
+    if (percentage === 0) return "bg-red-600"; // Empty tank - critical
     if (percentage < 25) return "bg-red-500";
     if (percentage < 50) return "bg-yellow-500";
     return "bg-green-500";
   };
 
   const getFuelLevelTextColor = (percentage: number) => {
+    if (percentage === 0) return "text-red-700"; // Empty tank - critical
     if (percentage < 25) return "text-red-600";
     if (percentage < 50) return "text-yellow-600";
     return "text-green-600";
@@ -29,10 +31,14 @@ export default function SiteCard({ site }: SiteCardProps) {
     return <div className={`${baseClasses} bg-gray-400 shadow-sm`} title={`${type} Offline`} />;
   };
 
-  const getAlertBadge = (alertStatus: string) => {
+  const getAlertBadge = (alertStatus: string, fuelLevel: number) => {
     switch (alertStatus) {
       case 'low_fuel':
-        return <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-200">Low Fuel</Badge>;
+        return (
+          <Badge variant="destructive" className="bg-red-100 text-red-800 border-red-200">
+            {fuelLevel === 0 ? 'Empty Tank' : 'Low Fuel'}
+          </Badge>
+        );
       case 'generator_off':
         return <Badge className="bg-yellow-100 text-yellow-800 border-yellow-200">Generator Off</Badge>;
       default:
@@ -40,7 +46,7 @@ export default function SiteCard({ site }: SiteCardProps) {
     }
   };
 
-  // FIXED: Better timestamp formatting
+  // Enhanced timestamp formatting
   const formatLastUpdated = (timestamp: string | Date) => {
     if (!timestamp) return "No data available";
     
@@ -48,7 +54,6 @@ export default function SiteCard({ site }: SiteCardProps) {
       const date = new Date(timestamp);
       const now = new Date();
       
-      // Check if the date is valid
       if (isNaN(date.getTime())) return "Invalid date";
       
       const diffMs = now.getTime() - date.getTime();
@@ -61,25 +66,21 @@ export default function SiteCard({ site }: SiteCardProps) {
         'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
       ];
       
-      // Format based on how recent the data is
       if (diffMinutes < 1) {
         return "Just now";
       } else if (diffMinutes < 60) {
         return `${diffMinutes} min${diffMinutes === 1 ? '' : 's'} ago`;
       } else if (diffHours < 24 && date.toDateString() === now.toDateString()) {
-        // Same day
         const hours = date.getHours().toString().padStart(2, '0');
         const minutes = date.getMinutes().toString().padStart(2, '0');
         return `Today, ${hours}:${minutes}`;
       } else if (diffDays < 7) {
-        // Within a week
         const day = date.getDate().toString().padStart(2, '0');
         const month = months[date.getMonth()];
         const hours = date.getHours().toString().padStart(2, '0');
         const minutes = date.getMinutes().toString().padStart(2, '0');
         return `${day} ${month}, ${hours}:${minutes}`;
       } else {
-        // Older than a week
         const day = date.getDate().toString().padStart(2, '0');
         const month = months[date.getMonth()];
         const year = date.getFullYear();
@@ -98,12 +99,12 @@ export default function SiteCard({ site }: SiteCardProps) {
     }
   };
 
-  // FIXED: Handle zero and undefined values properly
+  // Handle zero and undefined values properly - INCLUDE zeros as valid
   const fuelLevel = Math.max(0, Math.min(100, site.fuelLevelPercentage ?? 0));
   const fuelVolume = site.latestReading?.fuelVolume ? parseFloat(site.latestReading.fuelVolume) : 0;
   const temperature = site.latestReading?.temperature ? parseFloat(site.latestReading.temperature) : 0;
 
-  // Clean up the site name - remove "simbisa-" prefix and make it readable
+  // Clean up the site name
   const cleanSiteName = site.name
     .replace(/^simbisa-/, '')
     .split('-')
@@ -143,16 +144,23 @@ export default function SiteCard({ site }: SiteCardProps) {
           </div>
         </div>
         
-        {/* Fuel Level Section */}
+        {/* Fuel Level Section - Enhanced for zero values */}
         <div className="space-y-3">
           <div className="flex justify-between items-baseline">
             <span className="text-sm font-medium text-gray-700">Fuel Level</span>
-            <span className={`font-bold text-2xl ${getFuelLevelTextColor(fuelLevel)}`}>
-              {fuelLevel.toFixed(1)}%
-            </span>
+            <div className="flex items-center space-x-2">
+              <span className={`font-bold text-2xl ${getFuelLevelTextColor(fuelLevel)}`}>
+                {fuelLevel.toFixed(1)}%
+              </span>
+              {fuelLevel === 0 && (
+                <span className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded-full font-medium">
+                  EMPTY
+                </span>
+              )}
+            </div>
           </div>
           
-          {/* Progress Bar */}
+          {/* Enhanced Progress Bar - shows red for empty */}
           <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
             <div 
               className={`h-full transition-all duration-500 ${getFuelLevelColor(fuelLevel)}`}
@@ -166,7 +174,9 @@ export default function SiteCard({ site }: SiteCardProps) {
               <Fuel className="w-4 h-4 text-gray-400 mr-2" />
               <div>
                 <div className="text-gray-600">Volume</div>
-                <div className="font-medium text-gray-900">{fuelVolume.toFixed(0)}L</div>
+                <div className={`font-medium ${fuelVolume === 0 ? 'text-red-600' : 'text-gray-900'}`}>
+                  {fuelVolume.toFixed(0)}L
+                </div>
               </div>
             </div>
             
@@ -174,17 +184,19 @@ export default function SiteCard({ site }: SiteCardProps) {
               <Thermometer className="w-4 h-4 text-gray-400 mr-2" />
               <div>
                 <div className="text-gray-600">Temp</div>
-                <div className="font-medium text-gray-900">{temperature.toFixed(1)}°C</div>
+                <div className="font-medium text-gray-900">
+                  {temperature > 0 ? `${temperature.toFixed(1)}°C` : 'N/A'}
+                </div>
               </div>
             </div>
           </div>
           
-          {/* Alert Badge */}
+          {/* Alert Badge - Enhanced for empty tanks */}
           <div className="pt-3">
-            {getAlertBadge(site.alertStatus)}
+            {getAlertBadge(site.alertStatus, fuelLevel)}
           </div>
           
-          {/* FIXED: Last Updated with meaningful timestamp */}
+          {/* Last Updated */}
           <div className="text-xs text-gray-500 pt-2 border-t border-gray-100">
             {site.latestReading?.capturedAt ? (
               <>
@@ -194,6 +206,16 @@ export default function SiteCard({ site }: SiteCardProps) {
               <span className="text-orange-600 font-medium">No recent sensor data available</span>
             )}
           </div>
+
+          {/* Special indicator for zero fuel level */}
+          {fuelLevel === 0 && (
+            <div className="pt-2 border-t border-red-200">
+              <div className="flex items-center text-xs text-red-700 bg-red-50 px-2 py-1 rounded">
+                <div className="w-2 h-2 bg-red-500 rounded-full mr-2 animate-pulse"></div>
+                <span className="font-medium">Critical: Fuel tank empty</span>
+              </div>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
