@@ -11,23 +11,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Progress } from "@/components/ui/progress";
-import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  LineChart,
-  Line,
-  Legend
-} from "recharts";
 import { 
   Fuel, 
   Zap, 
@@ -37,7 +20,9 @@ import {
   AlertCircle,
   CheckCircle,
   Filter,
-  BarChart3
+  BarChart3,
+  Calendar,
+  Clock
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -45,43 +30,31 @@ interface CumulativeReading {
   siteId: number;
   siteName: string;
   deviceId: string;
-  fuelConsumed: number;
-  fuelTopped: number;
-  fuelConsumedPercent: number;
-  fuelToppedPercent: number;
-  generatorHours: number;
-  zesaHours: number;
-  offlineHours: number;
-  status: string;
-  calculatedAt: string;
-}
-
-interface CumulativeResponse {
-  date: string;
-  processedAt: string;
-  sites: CumulativeReading[];
-  summary: {
-    totalSites: number;
-    processedSites: number;
-    errorSites: number;
-    totalFuelConsumed: number;
-    totalFuelTopped: number;
-    totalGeneratorHours: number;
-    totalZesaHours: number;
-    totalOfflineHours: number;
+  totalFuelConsumed: number;
+  totalGeneratorHours: number;
+  totalZesaHours: number;
+  readingDays: number;
+  dateRange: {
+    first: string;
+    last: string;
   };
 }
 
-interface HistoricalReading {
-  id: number;
-  date: string;
-  totalFuelConsumed: string;
-  totalFuelToppedup: string;
-  totalGeneratorRuntime: string;
-  totalZesaRuntime: string;
-  totalOfflineTime: string;
-  calculatedAt: string;
-  siteName: string;
+interface CumulativeResponse {
+  sites: CumulativeReading[];
+  summary: {
+    dateRange: {
+      start: string;
+      end: string;
+      isRange: boolean;
+    };
+    totalSites: number;
+    totalFuelConsumed: number;
+    totalGeneratorHours: number;
+    totalZesaHours: number;
+    averageFuelPerSite: number;
+    daysIncluded: number;
+  };
 }
 
 export default function Analytics() {
@@ -90,37 +63,25 @@ export default function Analytics() {
   const { toast } = useToast();
 
   // State management
-  const [activeTab, setActiveTab] = useState("daily");
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [dateRange, setDateRange] = useState(() => {
     const today = new Date().toISOString().split('T')[0];
     return {
-      startDate: today, // Default to today only
+      startDate: today,
       endDate: today
     };
   });
   const [processingDate, setProcessingDate] = useState("");
 
-  // Debug logging for auth states - same as dashboard
-  console.log("🔍 Analytics render state:", {
-    authLoading,
-    isAuthenticated,
-    hasUser: !!user,
-    username: user?.username
-  });
-
-  // Wait for auth to complete before redirecting - SAME AS DASHBOARD
+  // Wait for auth to complete before redirecting
   useEffect(() => {
-    // Only redirect if auth is not loading and user is not authenticated
     if (!authLoading && !isAuthenticated) {
-      console.log("🚪 Redirecting to login - auth completed, user not authenticated");
       setLocation("/login");
     }
   }, [authLoading, isAuthenticated, setLocation]);
 
-  // Process cumulative readings mutation
+  // Process cumulative readings mutation (single day only)
   const processCumulativeMutation = useMutation({
-    mutationFn: async (date) => {
+    mutationFn: async (date?: string) => {
       const payload = date ? { date } : {};
       const response = await apiRequest("POST", "/api/cumulative-readings", payload);
       return response.json();
@@ -130,7 +91,7 @@ export default function Analytics() {
         title: "Success",
         description: `Processed ${data.summary.processedSites} sites successfully`,
       });
-      // Refresh historical data
+      // Refresh data
       queryClient.invalidateQueries({ queryKey: ["/api/cumulative-readings"] });
     },
     onError: (error) => {
@@ -142,68 +103,29 @@ export default function Analytics() {
     },
   });
 
-  // Get historical readings - FIXED: Better error handling and success detection
-  const { data: historicalData, isLoading: historicalLoading, error: historicalError } = useQuery({
+  // Get cumulative readings for date range
+  const { data: cumulativeData, isLoading: dataLoading, error: dataError } = useQuery<CumulativeResponse>({
     queryKey: ["/api/cumulative-readings", dateRange.startDate, dateRange.endDate],
     queryFn: async () => {
       const params = new URLSearchParams({
         startDate: dateRange.startDate,
         endDate: dateRange.endDate,
       });
-      console.log(`🔍 Fetching analytics data with params:`, Object.fromEntries(params));
       
-      try {
-        const response = await apiRequest("GET", `/api/cumulative-readings?${params}`);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const result = await response.json();
-        console.log(`✅ Analytics data received:`, result);
-        
-        // Ensure the result has the expected structure
-        const normalizedResult = {
-          readings: Array.isArray(result.readings) ? result.readings : [],
-          summary: result.summary || { totalReadings: 0 }
-        };
-        
-        console.log(`📊 Normalized analytics data:`, {
-          readingsCount: normalizedResult.readings.length,
-          hasSummary: !!normalizedResult.summary
-        });
-        
-        return normalizedResult;
-      } catch (error) {
-        console.error(`❌ Analytics query error:`, error);
-        throw error;
+      const response = await apiRequest("GET", `/api/cumulative-readings?${params}`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch data: ${response.status}`);
       }
+      
+      return response.json();
     },
-    enabled: !authLoading && isAuthenticated && !!user, // FIXED: Also check for user
+    enabled: !authLoading && isAuthenticated && !!user,
     refetchInterval: false,
     refetchOnWindowFocus: false,
-    staleTime: 30000, // 30 seconds
-    cacheTime: 300000, // 5 minutes
-    retry: (failureCount, error) => {
-      console.error(`❌ Analytics query retry ${failureCount}:`, error);
-      return failureCount < 2;
-    },
   });
 
-  // Add this debug logging right after the query
-  useEffect(() => {
-    console.log(`🔍 Analytics query state:`, {
-      loading: historicalLoading,
-      hasData: !!historicalData,
-      dataType: typeof historicalData,
-      readingsCount: historicalData?.readings?.length || 0,
-      error: historicalError?.message || null
-    });
-  }, [historicalLoading, historicalData, historicalError]);
-
-  // Show loading spinner while auth is loading - SAME AS DASHBOARD
+  // Show loading spinner while auth is loading
   if (authLoading) {
-    console.log("⏳ Auth still loading, showing auth spinner");
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -217,13 +139,11 @@ export default function Analytics() {
 
   // If auth completed but user is not authenticated, show nothing (redirect will happen)
   if (!authLoading && !isAuthenticated) {
-    console.log("🚫 Auth completed, user not authenticated - should redirect");
     return null;
   }
 
-  // If user is not available yet, show error - SAME AS DASHBOARD
+  // If user is not available yet, show error
   if (!user) {
-    console.log("❌ Authenticated but no user object");
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <Card className="max-w-md">
@@ -240,12 +160,11 @@ export default function Analytics() {
     );
   }
 
-  // Process readings for current date
+  // Event handlers
   const handleProcessToday = () => {
     processCumulativeMutation.mutate();
   };
 
-  // Process readings for specific date
   const handleProcessDate = () => {
     if (!processingDate) {
       toast({
@@ -258,141 +177,26 @@ export default function Analytics() {
     processCumulativeMutation.mutate(processingDate);
   };
 
-  // FIXED: Set date range to today
   const handleSetToday = () => {
     const today = new Date().toISOString().split('T')[0];
     setDateRange({ startDate: today, endDate: today });
   };
 
-  // FIXED: Set date range to last 7 days  
   const handleSetLast7Days = () => {
     const today = new Date().toISOString().split('T')[0];
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     setDateRange({ startDate: weekAgo, endDate: today });
   };
 
-  // FIXED: Set date range to last 30 days
   const handleSetLast30Days = () => {
     const today = new Date().toISOString().split('T')[0];
     const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
     setDateRange({ startDate: monthAgo, endDate: today });
   };
 
-  // Fixed data preparation functions with better error handling
-  const prepareDailyChartData = () => {
-    console.log(`📊 Preparing daily chart data:`, {
-      hasHistoricalData: !!historicalData,
-      hasReadings: !!historicalData?.readings,
-      readingsLength: historicalData?.readings?.length || 0
-    });
-
-    if (!historicalData?.readings || !Array.isArray(historicalData.readings)) {
-      console.log(`⚠️ No readings data available for daily chart`);
-      return [];
-    }
-
-    // Group by date and aggregate
-    const dateGroups = historicalData.readings.reduce((acc, reading) => {
-      if (!reading || !reading.date) {
-        console.warn(`⚠️ Invalid reading found:`, reading);
-        return acc;
-      }
-
-      const date = reading.date;
-      if (!acc[date]) {
-        acc[date] = {
-          date,
-          fuelConsumed: 0,
-          generatorHours: 0,
-          zesaHours: 0,
-          offlineHours: 0,
-          sites: 0
-        };
-      }
-      
-      // Safe parsing with fallbacks
-      acc[date].fuelConsumed += parseFloat(reading.totalFuelConsumed || '0') || 0;
-      acc[date].generatorHours += parseFloat(reading.totalGeneratorRuntime || '0') || 0;
-      acc[date].zesaHours += parseFloat(reading.totalZesaRuntime || '0') || 0;
-      acc[date].offlineHours += parseFloat(reading.totalOfflineTime || '0') || 0;
-      acc[date].sites += 1;
-      return acc;
-    }, {});
-
-    const result = Object.values(dateGroups).sort((a, b) => a.date.localeCompare(b.date));
-    console.log(`📊 Daily chart data prepared:`, { dataPoints: result.length });
-    return result;
-  };
-
-  // Prepare site comparison data with better error handling
-  const prepareSiteComparisonData = () => {
-    if (!historicalData?.readings || !Array.isArray(historicalData.readings)) {
-      return [];
-    }
-
-    // Group by site and aggregate
-    const siteGroups = historicalData.readings.reduce((acc, reading) => {
-      if (!reading || !reading.siteName) return acc;
-      
-      const siteName = reading.siteName;
-      if (!acc[siteName]) {
-        acc[siteName] = {
-          siteName,
-          totalFuelConsumed: 0,
-          totalGeneratorHours: 0,
-          totalZesaHours: 0,
-          readings: 0
-        };
-      }
-      
-      acc[siteName].totalFuelConsumed += parseFloat(reading.totalFuelConsumed || '0') || 0;
-      acc[siteName].totalGeneratorHours += parseFloat(reading.totalGeneratorRuntime || '0') || 0;
-      acc[siteName].totalZesaHours += parseFloat(reading.totalZesaRuntime || '0') || 0;
-      acc[siteName].readings += 1;
-      return acc;
-    }, {});
-
-    return Object.values(siteGroups)
-      .sort((a, b) => b.totalFuelConsumed - a.totalFuelConsumed)
-      .slice(0, 10); // Top 10 sites
-  };
-
-  // Prepare power distribution data with better error handling
-  const preparePowerDistributionData = () => {
-    if (!historicalData?.readings || !Array.isArray(historicalData.readings)) {
-      return [];
-    }
-
-    const totals = historicalData.readings.reduce((acc, reading) => {
-      if (!reading) return acc;
-      
-      acc.generator += parseFloat(reading.totalGeneratorRuntime || '0') || 0;
-      acc.zesa += parseFloat(reading.totalZesaRuntime || '0') || 0;
-      acc.offline += parseFloat(reading.totalOfflineTime || '0') || 0;
-      return acc;
-    }, { generator: 0, zesa: 0, offline: 0 });
-
-    return [
-      { name: 'Generator', value: Math.round(totals.generator * 100) / 100, fill: '#ef4444' },
-      { name: 'ZESA', value: Math.round(totals.zesa * 100) / 100, fill: '#3b82f6' },
-      { name: 'Offline', value: Math.round(totals.offline * 100) / 100, fill: '#6b7280' }
-    ];
-  };
-
-  const dailyChartData = prepareDailyChartData();
-  const siteComparisonData = prepareSiteComparisonData();
-  const powerDistributionData = preparePowerDistributionData();
-
-  // FIXED: Debug logging for data preparation
-  console.log("📊 Analytics data prepared:", {
-    hasHistoricalData: !!historicalData,
-    readingsCount: historicalData?.readings?.length || 0,
-    dailyChartPoints: dailyChartData.length,
-    siteComparisonPoints: siteComparisonData.length,
-    powerDistributionPoints: powerDistributionData.length,
-    loading: historicalLoading,
-    error: historicalError?.message
-  });
+  // Format numbers with proper units
+  const formatFuel = (liters: number) => `${liters.toFixed(1)}L`;
+  const formatHours = (hours: number) => `${hours.toFixed(1)}h`;
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -413,12 +217,8 @@ export default function Analytics() {
                     Welcome back, {user.fullName} ({user.role})
                   </p>
                   <p className="text-gray-500">
-                    Comprehensive fuel consumption and power usage analytics
+                    Fuel consumption and power usage analytics
                   </p>
-                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                    <CheckCircle className="w-3 h-3 mr-1" />
-                    Last updated: {new Date().toLocaleTimeString()}
-                  </span>
                 </div>
               </div>
               
@@ -455,11 +255,12 @@ export default function Analytics() {
             </div>
           </div>
 
-          {/* FIXED: Filters with Today button first */}
+          {/* Date Range Filters */}
           <Card className="mb-6">
             <CardContent className="p-4">
               <div className="flex items-center space-x-4 flex-wrap">
                 <Filter className="h-5 w-5 text-gray-500" />
+                
                 <div className="flex items-center space-x-2">
                   <Label>From:</Label>
                   <Input
@@ -469,6 +270,7 @@ export default function Analytics() {
                     className="w-40"
                   />
                 </div>
+                
                 <div className="flex items-center space-x-2">
                   <Label>To:</Label>
                   <Input
@@ -479,7 +281,7 @@ export default function Analytics() {
                   />
                 </div>
                 
-                {/* FIXED: Today button first, then Last 7 Days */}
+                {/* Quick date buttons */}
                 <Button
                   onClick={handleSetToday}
                   variant="outline"
@@ -488,6 +290,7 @@ export default function Analytics() {
                     dateRange.startDate === new Date().toISOString().split('T')[0] ? 
                     'bg-blue-100 text-blue-700 border-blue-300' : ''}
                 >
+                  <Calendar className="w-4 h-4 mr-1" />
                   Today
                 </Button>
                 
@@ -498,6 +301,7 @@ export default function Analytics() {
                 >
                   Last 7 Days
                 </Button>
+                
                 <Button
                   onClick={handleSetLast30Days}
                   variant="outline"
@@ -509,27 +313,25 @@ export default function Analytics() {
             </CardContent>
           </Card>
 
-          {/* Show loading while fetching data - FIXED: Only show when actually loading */}
-          {historicalLoading && (
+          {/* Loading State */}
+          {dataLoading && (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
                 <RefreshCw className="w-8 h-8 animate-spin text-blue-600 mx-auto mb-4" />
                 <h3 className="text-lg font-semibold text-gray-700">Loading Analytics Data...</h3>
-                <p className="text-gray-500">Fetching cumulative readings and reports</p>
+                <p className="text-gray-500">Fetching cumulative readings...</p>
               </div>
             </div>
           )}
 
-          {/* Show error state */}
-          {historicalError && (
+          {/* Error State */}
+          {dataError && (
             <Card className="mb-6">
               <CardContent className="p-6 text-center">
                 <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">Failed to Load Analytics Data</h3>
-                <p className="text-gray-600 mb-4">{historicalError.message}</p>
-                <Button 
-                  onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/cumulative-readings"] })}
-                >
+                <p className="text-gray-600 mb-4">{dataError.message}</p>
+                <Button onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/cumulative-readings"] })}>
                   <RefreshCw className="w-4 h-4 mr-2" />
                   Retry Loading
                 </Button>
@@ -537,8 +339,8 @@ export default function Analytics() {
             </Card>
           )}
 
-          {/* Summary Cards - FIXED: Show only when data is available and not loading */}
-          {!historicalLoading && historicalData?.readings && historicalData.readings.length > 0 && (
+          {/* Summary Cards */}
+          {!dataLoading && cumulativeData?.summary && (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
               <Card className="bg-gradient-to-r from-red-500 to-red-600 text-white">
                 <CardContent className="p-6">
@@ -546,7 +348,10 @@ export default function Analytics() {
                     <div>
                       <p className="text-red-100 text-sm">Total Fuel Consumed</p>
                       <p className="text-2xl font-bold">
-                        {Math.round(historicalData.readings.reduce((sum, r) => sum + (parseFloat(r.totalFuelConsumed || '0') || 0), 0))}L
+                        {formatFuel(cumulativeData.summary.totalFuelConsumed)}
+                      </p>
+                      <p className="text-red-200 text-xs mt-1">
+                        {cumulativeData.summary.daysIncluded} day{cumulativeData.summary.daysIncluded > 1 ? 's' : ''}
                       </p>
                     </div>
                     <Fuel className="h-8 w-8 text-red-200" />
@@ -560,7 +365,10 @@ export default function Analytics() {
                     <div>
                       <p className="text-blue-100 text-sm">Generator Hours</p>
                       <p className="text-2xl font-bold">
-                        {Math.round(historicalData.readings.reduce((sum, r) => sum + (parseFloat(r.totalGeneratorRuntime || '0') || 0), 0) * 10) / 10}h
+                        {formatHours(cumulativeData.summary.totalGeneratorHours)}
+                      </p>
+                      <p className="text-blue-200 text-xs mt-1">
+                        Avg: {formatHours(cumulativeData.summary.totalGeneratorHours / Math.max(1, cumulativeData.summary.daysIncluded))} per day
                       </p>
                     </div>
                     <Power className="h-8 w-8 text-blue-200" />
@@ -574,7 +382,10 @@ export default function Analytics() {
                     <div>
                       <p className="text-green-100 text-sm">ZESA Hours</p>
                       <p className="text-2xl font-bold">
-                        {Math.round(historicalData.readings.reduce((sum, r) => sum + (parseFloat(r.totalZesaRuntime || '0') || 0), 0) * 10) / 10}h
+                        {formatHours(cumulativeData.summary.totalZesaHours)}
+                      </p>
+                      <p className="text-green-200 text-xs mt-1">
+                        Avg: {formatHours(cumulativeData.summary.totalZesaHours / Math.max(1, cumulativeData.summary.daysIncluded))} per day
                       </p>
                     </div>
                     <Zap className="h-8 w-8 text-green-200" />
@@ -582,255 +393,182 @@ export default function Analytics() {
                 </CardContent>
               </Card>
 
-              <Card className="bg-gradient-to-r from-gray-500 to-gray-600 text-white">
+              <Card className="bg-gradient-to-r from-purple-500 to-purple-600 text-white">
                 <CardContent className="p-6">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-gray-100 text-sm">Data Points</p>
+                      <p className="text-purple-100 text-sm">Sites Analyzed</p>
                       <p className="text-2xl font-bold">
-                        {historicalData.readings.length}
+                        {cumulativeData.summary.totalSites}
+                      </p>
+                      <p className="text-purple-200 text-xs mt-1">
+                        Avg fuel: {formatFuel(cumulativeData.summary.averageFuelPerSite)}
                       </p>
                     </div>
-                    <BarChart3 className="h-8 w-8 text-gray-200" />
+                    <BarChart3 className="h-8 w-8 text-purple-200" />
                   </div>
                 </CardContent>
               </Card>
             </div>
           )}
 
-          {/* Charts and Analytics - FIXED: Only show when data exists and not loading */}
-          {!historicalLoading && historicalData?.readings && historicalData.readings.length > 0 ? (
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-              <TabsList className="grid w-full grid-cols-4">
-                <TabsTrigger value="daily">Daily Trends</TabsTrigger>
-                <TabsTrigger value="sites">Site Comparison</TabsTrigger>
-                <TabsTrigger value="power">Power Distribution</TabsTrigger>
-                <TabsTrigger value="details">Detailed Data</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="daily" className="space-y-6">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Fuel Consumption Trend */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Fuel className="h-5 w-5 text-red-500" />
-                        Daily Fuel Consumption
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <LineChart data={dailyChartData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="date" />
-                          <YAxis />
-                          <Tooltip />
-                          <Line 
-                            type="monotone" 
-                            dataKey="fuelConsumed" 
-                            stroke="#ef4444" 
-                            strokeWidth={2}
-                            name="Fuel (L)"
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </CardContent>
-                  </Card>
-
-                  {/* Power Usage Trend */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Power className="h-5 w-5 text-blue-500" />
-                        Daily Power Usage
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <ResponsiveContainer width="100%" height={300}>
-                        <LineChart data={dailyChartData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="date" />
-                          <YAxis />
-                          <Tooltip />
-                          <Legend />
-                          <Line 
-                            type="monotone" 
-                            dataKey="generatorHours" 
-                            stroke="#ef4444" 
-                            name="Generator (h)"
-                          />
-                          <Line 
-                            type="monotone" 
-                            dataKey="zesaHours" 
-                            stroke="#3b82f6" 
-                            name="ZESA (h)"
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </CardContent>
-                  </Card>
+          {/* Date Range Info */}
+          {!dataLoading && cumulativeData?.summary && (
+            <div className="mb-6">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <Badge variant="outline" className="px-3 py-1">
+                    <Calendar className="w-3 h-3 mr-1" />
+                    {cumulativeData.summary.dateRange.isRange 
+                      ? `${cumulativeData.summary.dateRange.start} to ${cumulativeData.summary.dateRange.end}`
+                      : cumulativeData.summary.dateRange.start
+                    }
+                  </Badge>
+                  <Badge variant="outline" className="px-3 py-1">
+                    <Clock className="w-3 h-3 mr-1" />
+                    {cumulativeData.summary.daysIncluded} day{cumulativeData.summary.daysIncluded > 1 ? 's' : ''} of data
+                  </Badge>
                 </div>
-              </TabsContent>
+                <Button variant="outline" size="sm">
+                  <Download className="w-4 h-4 mr-2" />
+                  Export CSV
+                </Button>
+              </div>
+            </div>
+          )}
 
-              <TabsContent value="sites" className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Top 10 Sites by Fuel Consumption</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {siteComparisonData.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={400}>
-                        <BarChart data={siteComparisonData} layout="horizontal">
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis type="number" />
-                          <YAxis dataKey="siteName" type="category" width={120} />
-                          <Tooltip />
-                          <Bar dataKey="totalFuelConsumed" fill="#ef4444" name="Fuel Consumed (L)" />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <div className="text-center py-8 text-gray-500">
-                        <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                        <p>No site comparison data available for the selected period.</p>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              </TabsContent>
-
-              <TabsContent value="power" className="space-y-6">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Power Source Distribution</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {powerDistributionData.length > 0 ? (
-                        <ResponsiveContainer width="100%" height={300}>
-                          <PieChart>
-                            <Pie
-                              data={powerDistributionData}
-                              cx="50%"
-                              cy="50%"
-                              outerRadius={100}
-                              dataKey="value"
-                              label={({ name, value }) => `${name}: ${value}h`}
-                            >
-                              {powerDistributionData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.fill} />
-                              ))}
-                            </Pie>
-                            <Tooltip />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      ) : (
-                        <div className="text-center py-8 text-gray-500">
-                          <Zap className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                          <p>No power distribution data available.</p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Power Efficiency Metrics</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      {powerDistributionData.length > 0 ? (
-                        powerDistributionData.map((item) => (
-                          <div key={item.name} className="space-y-2">
-                            <div className="flex justify-between">
-                              <span className="font-medium">{item.name}</span>
-                              <span className="text-sm text-gray-600">{item.value}h</span>
-                            </div>
-                            <Progress 
-                              value={item.value / Math.max(...powerDistributionData.map(d => d.value)) * 100}
-                              className="h-2"
-                            />
+          {/* Main Data Table */}
+          {!dataLoading && cumulativeData?.sites ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <span>Site Analytics Summary</span>
+                  <Badge className="bg-blue-100 text-blue-800">
+                    {cumulativeData.sites.length} sites
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-medium text-gray-700">Site Name</th>
+                        <th className="px-4 py-3 text-left font-medium text-gray-700">Device ID</th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-700">
+                          <div className="flex items-center justify-end">
+                            <Fuel className="w-4 h-4 mr-1 text-red-500" />
+                            Fuel Consumed
                           </div>
-                        ))
-                      ) : (
-                        <div className="text-center py-8 text-gray-500">
-                          <Power className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                          <p>No power efficiency data available.</p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
-              </TabsContent>
-
-              <TabsContent value="details" className="space-y-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                      <span>Detailed Readings</span>
-                      <Button variant="outline" size="sm">
-                        <Download className="w-4 h-4 mr-2" />
-                        Export CSV
-                      </Button>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-gray-50">
-                          <tr>
-                            <th className="px-4 py-2 text-left">Date</th>
-                            <th className="px-4 py-2 text-left">Site</th>
-                            <th className="px-4 py-2 text-right">Fuel (L)</th>
-                            <th className="px-4 py-2 text-right">Generator (h)</th>
-                            <th className="px-4 py-2 text-right">ZESA (h)</th>
-                            <th className="px-4 py-2 text-right">Offline (h)</th>
-                            <th className="px-4 py-2 text-left">Processed</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {historicalData.readings.slice(0, 50).map((reading) => (
-                            <tr key={reading.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-2">{reading.date}</td>
-                              <td className="px-4 py-2">{reading.siteName}</td>
-                              <td className="px-4 py-2 text-right font-mono">
-                                {parseFloat(reading.totalFuelConsumed || '0').toFixed(1)}
-                              </td>
-                              <td className="px-4 py-2 text-right font-mono">
-                                {parseFloat(reading.totalGeneratorRuntime || '0').toFixed(1)}
-                              </td>
-                              <td className="px-4 py-2 text-right font-mono">
-                                {parseFloat(reading.totalZesaRuntime || '0').toFixed(1)}
-                              </td>
-                              <td className="px-4 py-2 text-right font-mono">
-                                {parseFloat(reading.totalOfflineTime || '0').toFixed(1)}
-                              </td>
-                              <td className="px-4 py-2 text-xs text-gray-500">
-                                {new Date(reading.calculatedAt).toLocaleDateString()}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                        </th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-700">
+                          <div className="flex items-center justify-end">
+                            <Power className="w-4 h-4 mr-1 text-blue-500" />
+                            Generator Hours
+                          </div>
+                        </th>
+                        <th className="px-4 py-3 text-right font-medium text-gray-700">
+                          <div className="flex items-center justify-end">
+                            <Zap className="w-4 h-4 mr-1 text-green-500" />
+                            ZESA Hours
+                          </div>
+                        </th>
+                        <th className="px-4 py-3 text-center font-medium text-gray-700">Data Days</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200">
+                      {cumulativeData.sites.map((site) => (
+                        <tr key={site.siteId} className="hover:bg-gray-50">
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-gray-900">{site.siteName}</div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <code className="text-xs bg-gray-100 px-2 py-1 rounded">
+                              {site.deviceId}
+                            </code>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className={`font-mono font-bold ${
+                              site.totalFuelConsumed > 100 ? 'text-red-600' : 
+                              site.totalFuelConsumed > 50 ? 'text-orange-600' : 'text-gray-900'
+                            }`}>
+                              {formatFuel(site.totalFuelConsumed)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="font-mono text-blue-600 font-medium">
+                              {formatHours(site.totalGeneratorHours)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="font-mono text-green-600 font-medium">
+                              {formatHours(site.totalZesaHours)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <Badge variant="outline" className="text-xs">
+                              {site.readingDays} day{site.readingDays > 1 ? 's' : ''}
+                            </Badge>
+                          </td>
+                        </tr>
+                      ))}
                       
-                      {historicalData.readings.length > 50 && (
-                        <div className="text-center py-4 text-gray-500">
-                          Showing first 50 of {historicalData.readings.length} records
-                        </div>
+                      {/* Totals Row */}
+                      {cumulativeData.sites.length > 1 && (
+                        <tr className="bg-gray-100 font-bold border-t-2">
+                          <td className="px-4 py-3 font-bold text-gray-900">TOTALS</td>
+                          <td className="px-4 py-3 text-gray-500 text-xs">
+                            {cumulativeData.sites.length} sites
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="font-mono font-bold text-red-700 text-base">
+                              {formatFuel(cumulativeData.summary.totalFuelConsumed)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="font-mono font-bold text-blue-700 text-base">
+                              {formatHours(cumulativeData.summary.totalGeneratorHours)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="font-mono font-bold text-green-700 text-base">
+                              {formatHours(cumulativeData.summary.totalZesaHours)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <Badge className="bg-blue-100 text-blue-800">
+                              {cumulativeData.summary.daysIncluded} day{cumulativeData.summary.daysIncluded > 1 ? 's' : ''}
+                            </Badge>
+                          </td>
+                        </tr>
                       )}
+                    </tbody>
+                  </table>
+
+                  {cumulativeData.sites.length === 0 && (
+                    <div className="text-center py-12">
+                      <BarChart3 className="h-16 w-16 mx-auto mb-4 text-gray-400" />
+                      <h3 className="text-lg font-medium text-gray-900 mb-3">No Data Available</h3>
+                      <p className="text-gray-600 mb-6 max-w-md mx-auto">
+                        No cumulative readings found for the selected date range. 
+                        Process data for specific dates to generate analytics.
+                      </p>
+                      <Button onClick={handleProcessToday} className="bg-green-600 hover:bg-green-700">
+                        <CheckCircle className="w-4 h-4 mr-2" />
+                        Process Today's Data
+                      </Button>
                     </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-            </Tabs>
-          ) : !historicalLoading && (
-            // FIXED: Empty state when no data and not loading
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          ) : !dataLoading && (
+            /* Empty State */
             <div className="text-center py-12">
               <BarChart3 className="h-24 w-24 mx-auto mb-6 text-gray-400" />
               <h3 className="text-xl font-medium text-gray-900 mb-3">No Analytics Data Available</h3>
               <p className="text-gray-600 mb-6 max-w-md mx-auto">
-                {historicalData?.readings?.length === 0 
-                  ? "No cumulative readings found for the selected date range." 
-                  : "Start by processing today's data to generate analytics reports."
-                }
+                Start by processing today's data to generate analytics reports and view consumption patterns.
               </p>
               <div className="space-x-3">
                 <Button onClick={handleProcessToday} className="bg-green-600 hover:bg-green-700">

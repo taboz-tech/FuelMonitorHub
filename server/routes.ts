@@ -29,7 +29,7 @@ import {
   type SiteWithReadings,
   type AuthResponse
 } from "@shared/schema";
-import { eq, desc, and, inArray, sql, gte } from "drizzle-orm";
+import { eq, desc, and, inArray, sql, gte, lte } from "drizzle-orm";
 import { ne } from "drizzle-orm";
 import { CumulativeCalculator } from "./cumulative-calculator";
 
@@ -954,77 +954,151 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get cumulative readings for a date range (optional endpoint for viewing historical data)
   app.get("/api/cumulative-readings", authenticateToken, async (req: AuthRequest, res) => {
     try {
-      const { startDate, endDate, siteId } = req.query;
+      const { startDate, endDate } = req.query;
       const user = req.user!;
       const db = getDb();
       
-      let query = db.select({
-        id: cumulativeReadings.id,
-        siteId: cumulativeReadings.siteId,
-        deviceId: cumulativeReadings.deviceId,
-        date: cumulativeReadings.date,
-        totalFuelConsumed: cumulativeReadings.totalFuelConsumed,
-        totalFuelToppedup: cumulativeReadings.totalFuelToppedup,
-        fuelConsumedPercent: cumulativeReadings.fuelConsumedPercent,
-        fuelToppedupPercent: cumulativeReadings.fuelToppedupPercent,
-        totalGeneratorRuntime: cumulativeReadings.totalGeneratorRuntime,
-        totalZesaRuntime: cumulativeReadings.totalZesaRuntime,
-        totalOfflineTime: cumulativeReadings.totalOfflineTime,
-        calculatedAt: cumulativeReadings.calculatedAt,
-        siteName: sites.name
-      })
-      .from(cumulativeReadings)
-      .innerJoin(sites, eq(sites.id, cumulativeReadings.siteId));
-      
-      // Apply filters
-      const conditions = [];
-      
-      if (startDate) {
-        conditions.push(sql`${cumulativeReadings.date} >= ${startDate}`);
+      // Validate and parse dates
+      if (!startDate) {
+        return res.status(400).json({ message: "startDate parameter is required" });
       }
-      
-      if (endDate) {
-        conditions.push(sql`${cumulativeReadings.date} <= ${endDate}`);
+
+      let parsedStartDate: string;
+      let parsedEndDate: string;
+
+      try {
+        // Convert to YYYY-MM-DD format
+        const start = new Date(startDate as string);
+        parsedStartDate = start.toISOString().split('T')[0];
+        
+        if (endDate) {
+          const end = new Date(endDate as string);
+          parsedEndDate = end.toISOString().split('T')[0];
+        } else {
+          // If no end date provided, use same as start date (single day)
+          parsedEndDate = parsedStartDate;
+        }
+      } catch (error) {
+        return res.status(400).json({ message: "Invalid date format" });
       }
+
+      console.log(`📊 Getting cumulative readings from ${parsedStartDate} to ${parsedEndDate} for user: ${user.username}`);
+
+      // Get user's accessible site IDs based on role
+      let accessibleSiteIds: number[] = [];
       
-      if (siteId) {
-        conditions.push(eq(cumulativeReadings.siteId, parseInt(siteId as string)));
-      }
-      
-      // Role-based access control
-      if (user.role !== 'admin') {
-        const assignedSiteIds = await db
+      if (user.role === 'admin') {
+        // Admin can see all sites
+        const allSites = await db
+          .select({ id: sites.id })
+          .from(sites)
+          .where(eq(sites.isActive, true));
+        accessibleSiteIds = allSites.map(s => s.id);
+      } else {
+        // Manager/Supervisor can only see assigned sites
+        const assignments = await db
           .select({ siteId: userSiteAssignments.siteId })
           .from(userSiteAssignments)
           .where(eq(userSiteAssignments.userId, user.id));
-        
-        if (assignedSiteIds.length > 0) {
-          conditions.push(inArray(cumulativeReadings.siteId, assignedSiteIds.map(a => a.siteId)));
-        } else {
-          return res.json({ readings: [], summary: { totalReadings: 0 } });
-        }
+        accessibleSiteIds = assignments.map(a => a.siteId);
       }
-      
-      if (conditions.length > 0) {
-        query = query.where(and(...conditions));
-      }
-      
-      const readings = await query.orderBy(desc(cumulativeReadings.date), desc(cumulativeReadings.calculatedAt));
-      
-      res.json({
-        readings: readings,
-        summary: {
-          totalReadings: readings.length,
-          dateRange: {
-            start: startDate || 'All',
-            end: endDate || 'All'
+
+      console.log(`🔍 Found ${accessibleSiteIds.length} accessible sites for ${user.username} (${user.role})`);
+
+      if (accessibleSiteIds.length === 0) {
+        console.log(`⚠️ No accessible sites for user: ${user.username}`);
+        return res.json({
+          sites: [],
+          summary: {
+            dateRange: { start: parsedStartDate, end: parsedEndDate },
+            totalSites: 0,
+            totalFuelConsumed: 0,
+            totalGeneratorHours: 0,
+            totalZesaHours: 0
           }
+        });
+      }
+
+      // FIX: Use Drizzle's query builder with inArray instead of raw SQL
+      const readings = await db
+        .select({
+          siteId: cumulativeReadings.siteId,
+          siteName: sites.name,
+          deviceId: sites.deviceId,
+          totalFuelConsumed: sql<number>`SUM(CAST(${cumulativeReadings.totalFuelConsumed} AS DECIMAL))`,
+          totalGeneratorRuntime: sql<number>`SUM(CAST(${cumulativeReadings.totalGeneratorRuntime} AS DECIMAL))`,
+          totalZesaRuntime: sql<number>`SUM(CAST(${cumulativeReadings.totalZesaRuntime} AS DECIMAL))`,
+          readingDays: sql<number>`COUNT(*)`,
+          firstDate: sql<string>`MIN(${cumulativeReadings.date})`,
+          lastDate: sql<string>`MAX(${cumulativeReadings.date})`
+        })
+        .from(cumulativeReadings)
+        .innerJoin(sites, eq(sites.id, cumulativeReadings.siteId))
+        .where(
+          and(
+            gte(cumulativeReadings.date, parsedStartDate),
+            lte(cumulativeReadings.date, parsedEndDate),
+            inArray(cumulativeReadings.siteId, accessibleSiteIds),
+            eq(sites.isActive, true)
+          )
+        )
+        .groupBy(cumulativeReadings.siteId, sites.name, sites.deviceId)
+        .orderBy(desc(sql`SUM(CAST(${cumulativeReadings.totalFuelConsumed} AS DECIMAL))`));
+
+      // Process results
+      const siteReadings = readings.map((row) => ({
+        siteId: row.siteId,
+        siteName: row.siteName,
+        deviceId: row.deviceId,
+        totalFuelConsumed: Math.round((row.totalFuelConsumed || 0) * 10) / 10,
+        totalGeneratorHours: Math.round((row.totalGeneratorRuntime || 0) * 100) / 100,
+        totalZesaHours: Math.round((row.totalZesaRuntime || 0) * 100) / 100,
+        readingDays: row.readingDays || 0,
+        dateRange: {
+          first: row.firstDate,
+          last: row.lastDate
         }
+      }));
+
+      // Calculate summary totals
+      const summary = {
+        dateRange: { 
+          start: parsedStartDate, 
+          end: parsedEndDate,
+          isRange: parsedStartDate !== parsedEndDate 
+        },
+        totalSites: siteReadings.length,
+        totalFuelConsumed: Math.round(siteReadings.reduce((sum, site) => sum + site.totalFuelConsumed, 0) * 10) / 10,
+        totalGeneratorHours: Math.round(siteReadings.reduce((sum, site) => sum + site.totalGeneratorHours, 0) * 100) / 100,
+        totalZesaHours: Math.round(siteReadings.reduce((sum, site) => sum + site.totalZesaHours, 0) * 100) / 100,
+        averageFuelPerSite: siteReadings.length > 0 
+          ? Math.round((siteReadings.reduce((sum, site) => sum + site.totalFuelConsumed, 0) / siteReadings.length) * 10) / 10 
+          : 0,
+        daysIncluded: parsedStartDate === parsedEndDate 
+          ? 1 
+          : Math.ceil((new Date(parsedEndDate).getTime() - new Date(parsedStartDate).getTime()) / (1000 * 60 * 60 * 24)) + 1
+      };
+
+      console.log(`✅ Cumulative readings query completed:`, {
+        dateRange: `${parsedStartDate} to ${parsedEndDate}`,
+        sites: siteReadings.length,
+        totalFuel: summary.totalFuelConsumed,
+        totalGenHours: summary.totalGeneratorHours,
+        totalZesaHours: summary.totalZesaHours,
+        daysSpanned: summary.daysIncluded
       });
-      
+
+      res.json({
+        sites: siteReadings,
+        summary: summary
+      });
+
     } catch (error) {
-      console.error("Get cumulative readings error:", error);
-      res.status(500).json({ message: "Failed to retrieve cumulative readings" });
+      console.error("❌ Get cumulative readings error:", error);
+      res.status(500).json({ 
+        message: "Failed to retrieve cumulative readings",
+        error: error.message 
+      });
     }
   });
 
