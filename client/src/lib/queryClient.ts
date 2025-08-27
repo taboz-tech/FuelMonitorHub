@@ -1,3 +1,5 @@
+// Replace client/src/lib/queryClient.ts - Remove timeouts for large datasets
+
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { apiRequest } from "./api";
 
@@ -36,25 +38,13 @@ export const queryClient = new QueryClient({
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
-      staleTime: 30000, // 30 seconds
-      retry: (failureCount, error) => {
-        console.log('Query retry check:', { failureCount, error: error.message });
-        
-        // Don't retry auth errors
-        if (error.message.includes('authentication') || 
-            error.message.includes('401') || 
-            error.message.includes('403') ||
-            error.message.includes('HTML')) {
-          return false;
-        }
-        
-        // Retry up to 2 times for other errors
-        return failureCount < 2;
-      },
-      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
+      staleTime: 60000, // 1 minute stale time
+      // ❌ REMOVED ALL RETRY AND TIMEOUT LOGIC - Let large queries complete
+      retry: false, // No retries for large datasets
+      retryDelay: 0,
     },
     mutations: {
-      retry: false,
+      retry: false, // No retries for processing operations
     },
   },
 });

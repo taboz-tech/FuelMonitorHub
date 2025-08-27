@@ -120,7 +120,7 @@ export default function Analytics() {
 
   // Process cumulative readings mutation
   const processCumulativeMutation = useMutation({
-    mutationFn: async (date?: string) => {
+    mutationFn: async (date) => {
       const payload = date ? { date } : {};
       const response = await apiRequest("POST", "/api/cumulative-readings", payload);
       return response.json();
@@ -133,7 +133,7 @@ export default function Analytics() {
       // Refresh historical data
       queryClient.invalidateQueries({ queryKey: ["/api/cumulative-readings"] });
     },
-    onError: (error: any) => {
+    onError: (error) => {
       toast({
         title: "Error",
         description: error.message || "Failed to process readings",
@@ -142,25 +142,64 @@ export default function Analytics() {
     },
   });
 
-  // Get historical readings - FIXED: Only run when authenticated
-  const { data: historicalData, isLoading: historicalLoading, error: historicalError } = useQuery<{
-    readings: HistoricalReading[];
-    summary: { totalReadings: number };
-  }>({
+  // Get historical readings - FIXED: Better error handling and success detection
+  const { data: historicalData, isLoading: historicalLoading, error: historicalError } = useQuery({
     queryKey: ["/api/cumulative-readings", dateRange.startDate, dateRange.endDate],
     queryFn: async () => {
       const params = new URLSearchParams({
         startDate: dateRange.startDate,
         endDate: dateRange.endDate,
       });
-      const response = await apiRequest("GET", `/api/cumulative-readings?${params}`);
-      return response.json();
+      console.log(`🔍 Fetching analytics data with params:`, Object.fromEntries(params));
+      
+      try {
+        const response = await apiRequest("GET", `/api/cumulative-readings?${params}`);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const result = await response.json();
+        console.log(`✅ Analytics data received:`, result);
+        
+        // Ensure the result has the expected structure
+        const normalizedResult = {
+          readings: Array.isArray(result.readings) ? result.readings : [],
+          summary: result.summary || { totalReadings: 0 }
+        };
+        
+        console.log(`📊 Normalized analytics data:`, {
+          readingsCount: normalizedResult.readings.length,
+          hasSummary: !!normalizedResult.summary
+        });
+        
+        return normalizedResult;
+      } catch (error) {
+        console.error(`❌ Analytics query error:`, error);
+        throw error;
+      }
     },
-    enabled: !authLoading && isAuthenticated, // FIXED: Same as dashboard
+    enabled: !authLoading && isAuthenticated && !!user, // FIXED: Also check for user
     refetchInterval: false,
     refetchOnWindowFocus: false,
     staleTime: 30000, // 30 seconds
+    cacheTime: 300000, // 5 minutes
+    retry: (failureCount, error) => {
+      console.error(`❌ Analytics query retry ${failureCount}:`, error);
+      return failureCount < 2;
+    },
   });
+
+  // Add this debug logging right after the query
+  useEffect(() => {
+    console.log(`🔍 Analytics query state:`, {
+      loading: historicalLoading,
+      hasData: !!historicalData,
+      dataType: typeof historicalData,
+      readingsCount: historicalData?.readings?.length || 0,
+      error: historicalError?.message || null
+    });
+  }, [historicalLoading, historicalData, historicalError]);
 
   // Show loading spinner while auth is loading - SAME AS DASHBOARD
   if (authLoading) {
@@ -239,12 +278,26 @@ export default function Analytics() {
     setDateRange({ startDate: monthAgo, endDate: today });
   };
 
-  // Prepare chart data
+  // Fixed data preparation functions with better error handling
   const prepareDailyChartData = () => {
-    if (!historicalData?.readings) return [];
+    console.log(`📊 Preparing daily chart data:`, {
+      hasHistoricalData: !!historicalData,
+      hasReadings: !!historicalData?.readings,
+      readingsLength: historicalData?.readings?.length || 0
+    });
+
+    if (!historicalData?.readings || !Array.isArray(historicalData.readings)) {
+      console.log(`⚠️ No readings data available for daily chart`);
+      return [];
+    }
 
     // Group by date and aggregate
     const dateGroups = historicalData.readings.reduce((acc, reading) => {
+      if (!reading || !reading.date) {
+        console.warn(`⚠️ Invalid reading found:`, reading);
+        return acc;
+      }
+
       const date = reading.date;
       if (!acc[date]) {
         acc[date] = {
@@ -256,23 +309,31 @@ export default function Analytics() {
           sites: 0
         };
       }
-      acc[date].fuelConsumed += parseFloat(reading.totalFuelConsumed) || 0;
-      acc[date].generatorHours += parseFloat(reading.totalGeneratorRuntime) || 0;
-      acc[date].zesaHours += parseFloat(reading.totalZesaRuntime) || 0;
-      acc[date].offlineHours += parseFloat(reading.totalOfflineTime) || 0;
+      
+      // Safe parsing with fallbacks
+      acc[date].fuelConsumed += parseFloat(reading.totalFuelConsumed || '0') || 0;
+      acc[date].generatorHours += parseFloat(reading.totalGeneratorRuntime || '0') || 0;
+      acc[date].zesaHours += parseFloat(reading.totalZesaRuntime || '0') || 0;
+      acc[date].offlineHours += parseFloat(reading.totalOfflineTime || '0') || 0;
       acc[date].sites += 1;
       return acc;
-    }, {} as Record<string, any>);
+    }, {});
 
-    return Object.values(dateGroups).sort((a: any, b: any) => a.date.localeCompare(b.date));
+    const result = Object.values(dateGroups).sort((a, b) => a.date.localeCompare(b.date));
+    console.log(`📊 Daily chart data prepared:`, { dataPoints: result.length });
+    return result;
   };
 
-  // Prepare site comparison data
+  // Prepare site comparison data with better error handling
   const prepareSiteComparisonData = () => {
-    if (!historicalData?.readings) return [];
+    if (!historicalData?.readings || !Array.isArray(historicalData.readings)) {
+      return [];
+    }
 
     // Group by site and aggregate
     const siteGroups = historicalData.readings.reduce((acc, reading) => {
+      if (!reading || !reading.siteName) return acc;
+      
       const siteName = reading.siteName;
       if (!acc[siteName]) {
         acc[siteName] = {
@@ -283,26 +344,31 @@ export default function Analytics() {
           readings: 0
         };
       }
-      acc[siteName].totalFuelConsumed += parseFloat(reading.totalFuelConsumed) || 0;
-      acc[siteName].totalGeneratorHours += parseFloat(reading.totalGeneratorRuntime) || 0;
-      acc[siteName].totalZesaHours += parseFloat(reading.totalZesaRuntime) || 0;
+      
+      acc[siteName].totalFuelConsumed += parseFloat(reading.totalFuelConsumed || '0') || 0;
+      acc[siteName].totalGeneratorHours += parseFloat(reading.totalGeneratorRuntime || '0') || 0;
+      acc[siteName].totalZesaHours += parseFloat(reading.totalZesaRuntime || '0') || 0;
       acc[siteName].readings += 1;
       return acc;
-    }, {} as Record<string, any>);
+    }, {});
 
     return Object.values(siteGroups)
-      .sort((a: any, b: any) => b.totalFuelConsumed - a.totalFuelConsumed)
+      .sort((a, b) => b.totalFuelConsumed - a.totalFuelConsumed)
       .slice(0, 10); // Top 10 sites
   };
 
-  // Prepare power distribution data
+  // Prepare power distribution data with better error handling
   const preparePowerDistributionData = () => {
-    if (!historicalData?.readings) return [];
+    if (!historicalData?.readings || !Array.isArray(historicalData.readings)) {
+      return [];
+    }
 
     const totals = historicalData.readings.reduce((acc, reading) => {
-      acc.generator += parseFloat(reading.totalGeneratorRuntime) || 0;
-      acc.zesa += parseFloat(reading.totalZesaRuntime) || 0;
-      acc.offline += parseFloat(reading.totalOfflineTime) || 0;
+      if (!reading) return acc;
+      
+      acc.generator += parseFloat(reading.totalGeneratorRuntime || '0') || 0;
+      acc.zesa += parseFloat(reading.totalZesaRuntime || '0') || 0;
+      acc.offline += parseFloat(reading.totalOfflineTime || '0') || 0;
       return acc;
     }, { generator: 0, zesa: 0, offline: 0 });
 
@@ -316,6 +382,17 @@ export default function Analytics() {
   const dailyChartData = prepareDailyChartData();
   const siteComparisonData = prepareSiteComparisonData();
   const powerDistributionData = preparePowerDistributionData();
+
+  // FIXED: Debug logging for data preparation
+  console.log("📊 Analytics data prepared:", {
+    hasHistoricalData: !!historicalData,
+    readingsCount: historicalData?.readings?.length || 0,
+    dailyChartPoints: dailyChartData.length,
+    siteComparisonPoints: siteComparisonData.length,
+    powerDistributionPoints: powerDistributionData.length,
+    loading: historicalLoading,
+    error: historicalError?.message
+  });
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -432,7 +509,7 @@ export default function Analytics() {
             </CardContent>
           </Card>
 
-          {/* Show loading while fetching data */}
+          {/* Show loading while fetching data - FIXED: Only show when actually loading */}
           {historicalLoading && (
             <div className="flex items-center justify-center py-12">
               <div className="text-center">
@@ -460,8 +537,8 @@ export default function Analytics() {
             </Card>
           )}
 
-          {/* Summary Cards */}
-          {historicalData && (
+          {/* Summary Cards - FIXED: Show only when data is available and not loading */}
+          {!historicalLoading && historicalData?.readings && historicalData.readings.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
               <Card className="bg-gradient-to-r from-red-500 to-red-600 text-white">
                 <CardContent className="p-6">
@@ -469,7 +546,7 @@ export default function Analytics() {
                     <div>
                       <p className="text-red-100 text-sm">Total Fuel Consumed</p>
                       <p className="text-2xl font-bold">
-                        {Math.round(historicalData.readings.reduce((sum, r) => sum + (parseFloat(r.totalFuelConsumed) || 0), 0))}L
+                        {Math.round(historicalData.readings.reduce((sum, r) => sum + (parseFloat(r.totalFuelConsumed || '0') || 0), 0))}L
                       </p>
                     </div>
                     <Fuel className="h-8 w-8 text-red-200" />
@@ -483,7 +560,7 @@ export default function Analytics() {
                     <div>
                       <p className="text-blue-100 text-sm">Generator Hours</p>
                       <p className="text-2xl font-bold">
-                        {Math.round(historicalData.readings.reduce((sum, r) => sum + (parseFloat(r.totalGeneratorRuntime) || 0), 0) * 10) / 10}h
+                        {Math.round(historicalData.readings.reduce((sum, r) => sum + (parseFloat(r.totalGeneratorRuntime || '0') || 0), 0) * 10) / 10}h
                       </p>
                     </div>
                     <Power className="h-8 w-8 text-blue-200" />
@@ -497,7 +574,7 @@ export default function Analytics() {
                     <div>
                       <p className="text-green-100 text-sm">ZESA Hours</p>
                       <p className="text-2xl font-bold">
-                        {Math.round(historicalData.readings.reduce((sum, r) => sum + (parseFloat(r.totalZesaRuntime) || 0), 0) * 10) / 10}h
+                        {Math.round(historicalData.readings.reduce((sum, r) => sum + (parseFloat(r.totalZesaRuntime || '0') || 0), 0) * 10) / 10}h
                       </p>
                     </div>
                     <Zap className="h-8 w-8 text-green-200" />
@@ -521,170 +598,181 @@ export default function Analytics() {
             </div>
           )}
 
-          {/* Charts and Analytics */}
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="daily">Daily Trends</TabsTrigger>
-              <TabsTrigger value="sites">Site Comparison</TabsTrigger>
-              <TabsTrigger value="power">Power Distribution</TabsTrigger>
-              <TabsTrigger value="details">Detailed Data</TabsTrigger>
-            </TabsList>
+          {/* Charts and Analytics - FIXED: Only show when data exists and not loading */}
+          {!historicalLoading && historicalData?.readings && historicalData.readings.length > 0 ? (
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="daily">Daily Trends</TabsTrigger>
+                <TabsTrigger value="sites">Site Comparison</TabsTrigger>
+                <TabsTrigger value="power">Power Distribution</TabsTrigger>
+                <TabsTrigger value="details">Detailed Data</TabsTrigger>
+              </TabsList>
 
-            <TabsContent value="daily" className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Fuel Consumption Trend */}
+              <TabsContent value="daily" className="space-y-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Fuel Consumption Trend */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Fuel className="h-5 w-5 text-red-500" />
+                        Daily Fuel Consumption
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <LineChart data={dailyChartData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" />
+                          <YAxis />
+                          <Tooltip />
+                          <Line 
+                            type="monotone" 
+                            dataKey="fuelConsumed" 
+                            stroke="#ef4444" 
+                            strokeWidth={2}
+                            name="Fuel (L)"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  {/* Power Usage Trend */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Power className="h-5 w-5 text-blue-500" />
+                        Daily Power Usage
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <LineChart data={dailyChartData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="date" />
+                          <YAxis />
+                          <Tooltip />
+                          <Legend />
+                          <Line 
+                            type="monotone" 
+                            dataKey="generatorHours" 
+                            stroke="#ef4444" 
+                            name="Generator (h)"
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="zesaHours" 
+                            stroke="#3b82f6" 
+                            name="ZESA (h)"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="sites" className="space-y-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Fuel className="h-5 w-5 text-red-500" />
-                      Daily Fuel Consumption
-                    </CardTitle>
+                    <CardTitle>Top 10 Sites by Fuel Consumption</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <LineChart data={dailyChartData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis />
-                        <Tooltip />
-                        <Line 
-                          type="monotone" 
-                          dataKey="fuelConsumed" 
-                          stroke="#ef4444" 
-                          strokeWidth={2}
-                          name="Fuel (L)"
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-
-                {/* Power Usage Trend */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <Power className="h-5 w-5 text-blue-500" />
-                      Daily Power Usage
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <LineChart data={dailyChartData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" />
-                        <YAxis />
-                        <Tooltip />
-                        <Legend />
-                        <Line 
-                          type="monotone" 
-                          dataKey="generatorHours" 
-                          stroke="#ef4444" 
-                          name="Generator (h)"
-                        />
-                        <Line 
-                          type="monotone" 
-                          dataKey="zesaHours" 
-                          stroke="#3b82f6" 
-                          name="ZESA (h)"
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="sites" className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Top 10 Sites by Fuel Consumption</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={400}>
-                    <BarChart data={siteComparisonData} layout="horizontal">
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis type="number" />
-                      <YAxis dataKey="siteName" type="category" width={120} />
-                      <Tooltip />
-                      <Bar dataKey="totalFuelConsumed" fill="#ef4444" name="Fuel Consumed (L)" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="power" className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Power Source Distribution</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie
-                          data={powerDistributionData}
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={100}
-                          dataKey="value"
-                          label={({ name, value }) => `${name}: ${value}h`}
-                        >
-                          {powerDistributionData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.fill} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Power Efficiency Metrics</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {powerDistributionData.map((item) => (
-                      <div key={item.name} className="space-y-2">
-                        <div className="flex justify-between">
-                          <span className="font-medium">{item.name}</span>
-                          <span className="text-sm text-gray-600">{item.value}h</span>
-                        </div>
-                        <Progress 
-                          value={item.value / Math.max(...powerDistributionData.map(d => d.value)) * 100}
-                          className="h-2"
-                        />
+                    {siteComparisonData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={400}>
+                        <BarChart data={siteComparisonData} layout="horizontal">
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis type="number" />
+                          <YAxis dataKey="siteName" type="category" width={120} />
+                          <Tooltip />
+                          <Bar dataKey="totalFuelConsumed" fill="#ef4444" name="Fuel Consumed (L)" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                        <p>No site comparison data available for the selected period.</p>
                       </div>
-                    ))}
+                    )}
                   </CardContent>
                 </Card>
-              </div>
-            </TabsContent>
+              </TabsContent>
 
-            <TabsContent value="details" className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    <span>Detailed Readings</span>
-                    <Button variant="outline" size="sm">
-                      <Download className="w-4 h-4 mr-2" />
-                      Export CSV
-                    </Button>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {historicalLoading ? (
-                    <div className="flex items-center justify-center py-8">
-                      <RefreshCw className="w-6 h-6 animate-spin mr-2" />
-                      Loading data...
-                    </div>
-                  ) : historicalError ? (
-                    <div className="text-center py-8 text-red-600">
-                      <AlertCircle className="w-12 h-12 mx-auto mb-4" />
-                      <p>Error loading data: {historicalError.message}</p>
-                    </div>
-                  ) : (
+              <TabsContent value="power" className="space-y-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Power Source Distribution</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {powerDistributionData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height={300}>
+                          <PieChart>
+                            <Pie
+                              data={powerDistributionData}
+                              cx="50%"
+                              cy="50%"
+                              outerRadius={100}
+                              dataKey="value"
+                              label={({ name, value }) => `${name}: ${value}h`}
+                            >
+                              {powerDistributionData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.fill} />
+                              ))}
+                            </Pie>
+                            <Tooltip />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="text-center py-8 text-gray-500">
+                          <Zap className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                          <p>No power distribution data available.</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Power Efficiency Metrics</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {powerDistributionData.length > 0 ? (
+                        powerDistributionData.map((item) => (
+                          <div key={item.name} className="space-y-2">
+                            <div className="flex justify-between">
+                              <span className="font-medium">{item.name}</span>
+                              <span className="text-sm text-gray-600">{item.value}h</span>
+                            </div>
+                            <Progress 
+                              value={item.value / Math.max(...powerDistributionData.map(d => d.value)) * 100}
+                              className="h-2"
+                            />
+                          </div>
+                        ))
+                      ) : (
+                        <div className="text-center py-8 text-gray-500">
+                          <Power className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                          <p>No power efficiency data available.</p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="details" className="space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <span>Detailed Readings</span>
+                      <Button variant="outline" size="sm">
+                        <Download className="w-4 h-4 mr-2" />
+                        Export CSV
+                      </Button>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead className="bg-gray-50">
@@ -699,21 +787,21 @@ export default function Analytics() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200">
-                          {historicalData?.readings.slice(0, 50).map((reading) => (
+                          {historicalData.readings.slice(0, 50).map((reading) => (
                             <tr key={reading.id} className="hover:bg-gray-50">
                               <td className="px-4 py-2">{reading.date}</td>
                               <td className="px-4 py-2">{reading.siteName}</td>
                               <td className="px-4 py-2 text-right font-mono">
-                                {parseFloat(reading.totalFuelConsumed).toFixed(1)}
+                                {parseFloat(reading.totalFuelConsumed || '0').toFixed(1)}
                               </td>
                               <td className="px-4 py-2 text-right font-mono">
-                                {parseFloat(reading.totalGeneratorRuntime).toFixed(1)}
+                                {parseFloat(reading.totalGeneratorRuntime || '0').toFixed(1)}
                               </td>
                               <td className="px-4 py-2 text-right font-mono">
-                                {parseFloat(reading.totalZesaRuntime).toFixed(1)}
+                                {parseFloat(reading.totalZesaRuntime || '0').toFixed(1)}
                               </td>
                               <td className="px-4 py-2 text-right font-mono">
-                                {parseFloat(reading.totalOfflineTime).toFixed(1)}
+                                {parseFloat(reading.totalOfflineTime || '0').toFixed(1)}
                               </td>
                               <td className="px-4 py-2 text-xs text-gray-500">
                                 {new Date(reading.calculatedAt).toLocaleDateString()}
@@ -723,31 +811,42 @@ export default function Analytics() {
                         </tbody>
                       </table>
                       
-                      {historicalData?.readings && historicalData.readings.length > 50 && (
+                      {historicalData.readings.length > 50 && (
                         <div className="text-center py-4 text-gray-500">
                           Showing first 50 of {historicalData.readings.length} records
                         </div>
                       )}
-
-                      {historicalData?.readings.length === 0 && (
-                        <div className="text-center py-8 text-gray-500">
-                          <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                          <h3 className="text-lg font-medium text-gray-900 mb-2">No Data Available</h3>
-                          <p className="text-gray-600 mb-4">
-                            No cumulative readings found for the selected date range.
-                          </p>
-                          <Button onClick={handleProcessToday}>
-                            <CheckCircle className="w-4 h-4 mr-2" />
-                            Process Today's Data
-                          </Button>
-                        </div>
-                      )}
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-          </Tabs>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
+          ) : !historicalLoading && (
+            // FIXED: Empty state when no data and not loading
+            <div className="text-center py-12">
+              <BarChart3 className="h-24 w-24 mx-auto mb-6 text-gray-400" />
+              <h3 className="text-xl font-medium text-gray-900 mb-3">No Analytics Data Available</h3>
+              <p className="text-gray-600 mb-6 max-w-md mx-auto">
+                {historicalData?.readings?.length === 0 
+                  ? "No cumulative readings found for the selected date range." 
+                  : "Start by processing today's data to generate analytics reports."
+                }
+              </p>
+              <div className="space-x-3">
+                <Button onClick={handleProcessToday} className="bg-green-600 hover:bg-green-700">
+                  <CheckCircle className="w-4 h-4 mr-2" />
+                  Process Today's Data
+                </Button>
+                <Button 
+                  onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/cumulative-readings"] })}
+                  variant="outline"
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Refresh Data
+                </Button>
+              </div>
+            </div>
+          )}
         </main>
       </div>
     </div>

@@ -27,14 +27,16 @@ export async function apiRequest(
   // Construct full URL
   const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
   
-  console.log(`🌐 API Request: ${method} ${fullUrl}`);
+  console.log(`🌐 API Request: ${method} ${fullUrl} (attempt ${retryCount + 1})`);
 
+  // 🚀 NO TIMEOUT - Let the API take as long as it needs for large datasets
   try {
     const res = await fetch(fullUrl, {
       method,
       headers,
       body: data ? JSON.stringify(data) : undefined,
       credentials: "include",
+      // ❌ REMOVED: signal: controller.signal (no more timeout)
     });
 
     // Check if response is HTML (login page) instead of JSON
@@ -122,14 +124,14 @@ export async function apiRequest(
   } catch (error) {
     console.error(`❌ API request failed (attempt ${retryCount + 1}):`, error);
     
-    // Retry logic for network errors (not auth errors)
-    if (retryCount < 2 && 
+    // Retry logic for network errors (not auth errors) - REDUCED retries for faster feedback
+    if (retryCount < 1 && 
         !error.message.includes('authentication') && 
         !error.message.includes('HTML') &&
         !error.message.includes('401') &&
         !error.message.includes('403')) {
-      console.log(`🔄 Retrying request (${retryCount + 1}/2)...`);
-      await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+      console.log(`🔄 Retrying request (${retryCount + 1}/1)...`);
+      await new Promise(resolve => setTimeout(resolve, 2000 * (retryCount + 1)));
       return apiRequest(method, url, data, retryCount + 1);
     }
     
