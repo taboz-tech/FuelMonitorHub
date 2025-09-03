@@ -1,9 +1,9 @@
 import { queryClient } from "./queryClient";
 
-// Get the API base URL from environment variable
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://154.119.80.28:4172';
+// Use the direct external API (CORS is configured on server)
+const API_BASE_URL = 'https://simbisa-portal-demo-api.ipos.co.zw';
 
-console.log('API Base URL:', API_BASE_URL);
+console.log('🌐 Using external API:', API_BASE_URL);
 
 let isRefreshing = false;
 
@@ -29,14 +29,13 @@ export async function apiRequest(
   
   console.log(`🌐 API Request: ${method} ${fullUrl} (attempt ${retryCount + 1})`);
 
-  // 🚀 NO TIMEOUT - Let the API take as long as it needs for large datasets
   try {
     const res = await fetch(fullUrl, {
       method,
       headers,
       body: data ? JSON.stringify(data) : undefined,
+      // Include credentials since CORS AllowCredentials is true
       credentials: "include",
-      // ❌ REMOVED: signal: controller.signal (no more timeout)
     });
 
     // Check if response is HTML (login page) instead of JSON
@@ -124,7 +123,7 @@ export async function apiRequest(
   } catch (error) {
     console.error(`❌ API request failed (attempt ${retryCount + 1}):`, error);
     
-    // Retry logic for network errors (not auth errors) - REDUCED retries for faster feedback
+    // Retry logic for network errors (not auth errors)
     if (retryCount < 1 && 
         !error.message.includes('authentication') && 
         !error.message.includes('HTML') &&

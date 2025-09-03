@@ -17,25 +17,18 @@ COPY tailwind.config.ts ./
 COPY tsconfig.json ./
 COPY vite.config.ts ./
 
-# Build arguments
-ARG REACT_APP_API_BASE_URL
-ARG REACT_APP_VERSION
-ARG GENERATE_SOURCEMAP
+# Build arguments - Updated for external HTTPS API
+ARG REACT_APP_API_BASE_URL=https://simbisa-portal-demo-api.ipos.co.zw
+ARG REACT_APP_VERSION=1.0.0
+ARG GENERATE_SOURCEMAP=false
 
 # Set environment variables for build
 ENV REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL
 ENV REACT_APP_VERSION=$REACT_APP_VERSION
 ENV GENERATE_SOURCEMAP=$GENERATE_SOURCEMAP
 
-# Build ONLY the frontend (not the server)
+# Build the frontend
 RUN npx vite build
-
-# Debug: List what was built
-RUN ls -la dist/
-RUN ls -la dist/public/ || echo "No public directory found"
-
-# Debug: Check if index.html exists in the right place
-RUN test -f dist/public/index.html && echo "index.html found in dist/public" || echo "index.html NOT found in dist/public"
 
 # Production stage
 FROM node:20-alpine
@@ -45,7 +38,7 @@ WORKDIR /app
 # Install serve package globally
 RUN npm install -g serve
 
-# Copy built files from build stage (from the correct location)
+# Copy built files from build stage
 COPY --from=build /app/dist/public ./dist
 
 # Create non-root user
