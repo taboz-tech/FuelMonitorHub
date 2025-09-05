@@ -1,6 +1,6 @@
 import { queryClient } from "./queryClient";
 
-// Use the direct external API (CORS is configured on server)
+// Use the external API base URL (HTTPS for production)
 const API_BASE_URL = 'https://simbisa-portal-demo-api.ipos.co.zw';
 
 console.log('🌐 Using external API:', API_BASE_URL);
@@ -34,18 +34,16 @@ export async function apiRequest(
       method,
       headers,
       body: data ? JSON.stringify(data) : undefined,
-      // Include credentials since CORS AllowCredentials is true
-      credentials: "include",
+      // External API - no credentials needed
     });
 
-    // Check if response is HTML (login page) instead of JSON
+    // Check if response is HTML (error page) instead of JSON
     const contentType = res.headers.get('content-type');
     const isHtml = contentType?.includes('text/html');
     
     if (isHtml) {
-      console.error('🚨 Received HTML instead of JSON - likely authentication issue');
+      console.error('🚨 Received HTML instead of JSON - likely API issue');
       console.error('Response status:', res.status);
-      console.error('Response headers:', Object.fromEntries(res.headers.entries()));
       
       // For auth endpoints, don't clear token immediately
       if (!url.includes('/auth/')) {

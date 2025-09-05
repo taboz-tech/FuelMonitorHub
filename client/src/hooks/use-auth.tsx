@@ -9,6 +9,7 @@ interface AuthContextType {
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   isLoading: boolean;
+  checkingAuth: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -19,14 +20,16 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<Omit<User, 'password'> | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [, setLocation] = useLocation();
+  const [isLoading, setIsLoading] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [location, setLocation] = useLocation();
 
+  // Centralized auth validation function
   const validateToken = async (token: string): Promise<boolean> => {
     try {
-      console.log('🔍 Validating token...');
+      console.log('🔍 Validating token with external API...');
       
-      // Call the auth validation endpoint
+      // Call the external API validation endpoint
       const response = await apiRequest('GET', '/api/auth/validate');
       
       if (response.ok) {
@@ -65,43 +68,39 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return null;
       }
       
-      return {
-        id: payload.id,
-        username: payload.username,
-        email: payload.email,
-        role: payload.role,
-        fullName: payload.fullName,
-        isActive: true,
-        lastLogin: null,
-        createdAt: new Date(),
-      };
+      return payload;
     } catch (error) {
       console.error('❌ Error parsing token:', error);
       return null;
     }
   };
 
+  // Initialize authentication on app load
   useEffect(() => {
     const initAuth = async () => {
+      console.log('🔐 Initializing authentication...');
+      setCheckingAuth(true);
+      
       const token = localStorage.getItem('auth_token');
       
       if (token) {
         console.log('🔑 Found existing token, checking validity...');
         
         // First check if token is expired locally
-        const userData = parseTokenPayload(token);
-        if (!userData) {
+        const tokenPayload = parseTokenPayload(token);
+        if (!tokenPayload) {
           console.log('🗑️ Token expired or invalid, removing...');
           localStorage.removeItem('auth_token');
-          setIsLoading(false);
+          setUser(null);
+          setCheckingAuth(false);
           return;
         }
         
-        // Token looks valid, now validate with server
+        // Token looks valid locally, now validate with external API
         const isValid = await validateToken(token);
         
         if (!isValid) {
-          console.log('🗑️ Server rejected token, removing...');
+          console.log('🗑️ External API rejected token, removing...');
           localStorage.removeItem('auth_token');
           setUser(null);
         } else {
@@ -112,15 +111,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
         console.log('🔍 No token found in localStorage');
       }
       
-      setIsLoading(false);
+      setCheckingAuth(false);
     };
 
     initAuth();
   }, []);
 
+  // Global route protection - redirect to login if not authenticated
+  useEffect(() => {
+    if (!checkingAuth) {
+      const publicRoutes = ['/', '/login'];
+      const isPublicRoute = publicRoutes.includes(location);
+      
+      if (!user && !isPublicRoute) {
+        console.log(`🚪 Redirecting to login from ${location} - user not authenticated`);
+        setLocation('/login');
+      } else if (user && (location === '/' || location === '/login')) {
+        console.log('🏠 Authenticated user accessing public route, redirecting to dashboard');
+        setLocation('/dashboard');
+      }
+    }
+  }, [checkingAuth, user, location, setLocation]);
+
   const login = async (username: string, password: string) => {
     try {
+      setIsLoading(true);
       console.log('🔐 Attempting login for user:', username);
+      
       const response = await apiRequest("POST", "/api/auth/login", {
         username,
         password,
@@ -140,17 +157,42 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setUser(data.user);
       
       console.log('✅ Login successful for user:', data.user.username);
+      
+      // Redirect to dashboard after successful login
+      setLocation('/dashboard');
     } catch (error) {
       console.error('❌ Login error:', error);
       throw error;
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const logout = () => {
-    console.log('🚪 Logging out...');
-    localStorage.removeItem('auth_token');
-    setUser(null);
-    setLocation('/login');
+  const logout = async () => {
+    try {
+      console.log('🚪 Logging out...');
+      
+      // Call logout endpoint if user is authenticated
+      if (user) {
+        try {
+          await apiRequest("POST", "/api/auth/logout");
+        } catch (error) {
+          console.warn('⚠️ Logout API call failed:', error);
+          // Continue with local logout even if API call fails
+        }
+      }
+      
+      // Clear local state
+      localStorage.removeItem('auth_token');
+      setUser(null);
+      setLocation('/login');
+    } catch (error) {
+      console.error('❌ Logout error:', error);
+      // Force local logout even if API fails
+      localStorage.removeItem('auth_token');
+      setUser(null);
+      setLocation('/login');
+    }
   };
 
   const value = {
@@ -159,6 +201,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     login,
     logout,
     isLoading,
+    checkingAuth,
   };
 
   return (
@@ -174,4 +217,24 @@ export function useAuth() {
     throw new Error('useAuth must be used within an AuthProvider');
   }
   return context;
+}
+
+// Custom hook for route protection
+export function useRequireAuth(allowedRoles?: string[]) {
+  const { user, checkingAuth } = useAuth();
+  const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    if (!checkingAuth) {
+      if (!user) {
+        console.log('🚫 Route requires authentication, redirecting to login');
+        setLocation('/login');
+      } else if (allowedRoles && !allowedRoles.includes(user.role)) {
+        console.log(`🚫 Route requires role ${allowedRoles.join(' or ')}, user has ${user.role}`);
+        setLocation('/dashboard'); // Redirect to safe route
+      }
+    }
+  }, [checkingAuth, user, allowedRoles, setLocation]);
+
+  return { user, isLoading: checkingAuth };
 }

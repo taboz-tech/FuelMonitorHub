@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
-import { useLocation } from "wouter";
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
+import ProtectedRoute from "@/components/auth/protected-route";
 import Header from "@/components/layout/header";
 import Sidebar from "@/components/layout/sidebar";
 import { Button } from "@/components/ui/button";
@@ -57,9 +57,8 @@ interface CumulativeResponse {
   };
 }
 
-export default function Analytics() {
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const [, setLocation] = useLocation();
+function AnalyticsContent() {
+  const { user } = useAuth();
   const { toast } = useToast();
 
   // State management
@@ -71,13 +70,6 @@ export default function Analytics() {
     };
   });
   const [processingDate, setProcessingDate] = useState("");
-
-  // Wait for auth to complete before redirecting
-  useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      setLocation("/login");
-    }
-  }, [authLoading, isAuthenticated, setLocation]);
 
   // Process cumulative readings mutation (single day only)
   const processCumulativeMutation = useMutation({
@@ -119,46 +111,10 @@ export default function Analytics() {
       
       return response.json();
     },
-    enabled: !authLoading && isAuthenticated && !!user,
+    enabled: !!user,
     refetchInterval: false,
     refetchOnWindowFocus: false,
   });
-
-  // Show loading spinner while auth is loading
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <h2 className="text-lg font-semibold text-gray-700">Checking authentication...</h2>
-          <p className="text-gray-500">Please wait</p>
-        </div>
-      </div>
-    );
-  }
-
-  // If auth completed but user is not authenticated, show nothing (redirect will happen)
-  if (!authLoading && !isAuthenticated) {
-    return null;
-  }
-
-  // If user is not available yet, show error
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card className="max-w-md">
-          <CardContent className="pt-6 text-center">
-            <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-            <h2 className="text-lg font-semibold text-gray-900 mb-2">Authentication Error</h2>
-            <p className="text-gray-600 mb-4">User information not available</p>
-            <Button onClick={() => window.location.reload()}>
-              Reload Page
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   // Event handlers
   const handleProcessToday = () => {
@@ -214,7 +170,7 @@ export default function Analytics() {
                 </h2>
                 <div className="flex items-center mt-2 space-x-4">
                   <p className="text-gray-600">
-                    Welcome back, {user.fullName} ({user.role})
+                    Welcome back, {user?.fullName} ({user?.role})
                   </p>
                   <p className="text-gray-500">
                     Fuel consumption and power usage analytics
@@ -412,40 +368,21 @@ export default function Analytics() {
             </div>
           )}
 
-          {/* Date Range Info */}
-          {!dataLoading && cumulativeData?.summary && (
-            <div className="mb-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <Badge variant="outline" className="px-3 py-1">
-                    <Calendar className="w-3 h-3 mr-1" />
-                    {cumulativeData.summary.dateRange.isRange 
-                      ? `${cumulativeData.summary.dateRange.start} to ${cumulativeData.summary.dateRange.end}`
-                      : cumulativeData.summary.dateRange.start
-                    }
-                  </Badge>
-                  <Badge variant="outline" className="px-3 py-1">
-                    <Clock className="w-3 h-3 mr-1" />
-                    {cumulativeData.summary.daysIncluded} day{cumulativeData.summary.daysIncluded > 1 ? 's' : ''} of data
-                  </Badge>
-                </div>
-                <Button variant="outline" size="sm">
-                  <Download className="w-4 h-4 mr-2" />
-                  Export CSV
-                </Button>
-              </div>
-            </div>
-          )}
-
           {/* Main Data Table */}
           {!dataLoading && cumulativeData?.sites ? (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
                   <span>Site Analytics Summary</span>
-                  <Badge className="bg-blue-100 text-blue-800">
-                    {cumulativeData.sites.length} sites
-                  </Badge>
+                  <div className="flex items-center space-x-2">
+                    <Badge className="bg-blue-100 text-blue-800">
+                      {cumulativeData.sites.length} sites
+                    </Badge>
+                    <Button variant="outline" size="sm">
+                      <Download className="w-4 h-4 mr-2" />
+                      Export CSV
+                    </Button>
+                  </div>
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -588,5 +525,13 @@ export default function Analytics() {
         </main>
       </div>
     </div>
+  );
+}
+
+export default function Analytics() {
+  return (
+    <ProtectedRoute>
+      <AnalyticsContent />
+    </ProtectedRoute>
   );
 }

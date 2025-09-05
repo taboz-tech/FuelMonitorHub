@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
-import { useLocation } from "wouter";
+import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
+import ProtectedRoute from "@/components/auth/protected-route";
 import Header from "@/components/layout/header";
 import Sidebar from "@/components/layout/sidebar";
 import UserDialog from "@/components/users/user-dialog";
@@ -13,13 +13,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
-import { Plus, Edit, Trash2, Search, Users2, Filter, MapPin } from "lucide-react";
+import { Plus, Edit, Trash2, Search, Users2, Filter, MapPin, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type User } from "@shared/schema";
 
-export default function Users() {
-  const { user, isAuthenticated } = useAuth();
-  const [, setLocation] = useLocation();
+function UsersContent() {
+  const { user } = useAuth();
   const { toast } = useToast();
   
   // State management
@@ -29,18 +28,10 @@ export default function Users() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<Omit<User, 'password'> | null>(null);
 
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setLocation("/login");
-    } else if (user?.role !== 'admin') {
-      setLocation("/dashboard");
-    }
-  }, [isAuthenticated, user, setLocation]);
-
   // Fetch users
   const { data: users, isLoading, error } = useQuery<Omit<User, 'password'>[]>({
     queryKey: ["/api/users"],
-    enabled: isAuthenticated && user?.role === 'admin',
+    enabled: !!user && user.role === 'admin',
     staleTime: 30000, // 30 seconds
   });
 
@@ -210,10 +201,6 @@ export default function Users() {
     return acc;
   }, {} as Record<string, number>) || {};
 
-  if (!isAuthenticated || user?.role !== 'admin') {
-    return null;
-  }
-
   if (error) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -235,6 +222,7 @@ export default function Users() {
                     onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/users"] })}
                     className="mt-4"
                   >
+                    <RefreshCw className="w-4 h-4 mr-2" />
                     Try Again
                   </Button>
                 </div>
@@ -257,6 +245,11 @@ export default function Users() {
               <div className="flex items-center justify-between">
                 <div className="h-8 bg-gray-200 rounded w-1/4"></div>
                 <div className="h-10 bg-gray-200 rounded w-32"></div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="h-24 bg-gray-200 rounded-xl"></div>
+                ))}
               </div>
               <div className="h-96 bg-gray-200 rounded-xl"></div>
             </div>
@@ -380,17 +373,27 @@ export default function Users() {
           {/* Users Table */}
           <Card>
             <CardHeader>
-              <CardTitle>
-                System Users 
-                {searchTerm || roleFilter !== "all" ? (
-                  <span className="text-sm font-normal text-gray-500 ml-2">
-                    ({filteredUsers.length} of {users?.length || 0} users)
-                  </span>
-                ) : (
-                  <span className="text-sm font-normal text-gray-500 ml-2">
-                    ({users?.length || 0} users)
-                  </span>
-                )}
+              <CardTitle className="flex items-center justify-between">
+                <span>
+                  System Users 
+                  {searchTerm || roleFilter !== "all" ? (
+                    <span className="text-sm font-normal text-gray-500 ml-2">
+                      ({filteredUsers.length} of {users?.length || 0} users)
+                    </span>
+                  ) : (
+                    <span className="text-sm font-normal text-gray-500 ml-2">
+                      ({users?.length || 0} users)
+                    </span>
+                  )}
+                </span>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/users"] })}
+                >
+                  <RefreshCw className="w-4 h-4 mr-1" />
+                  Refresh
+                </Button>
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -539,5 +542,13 @@ export default function Users() {
         </main>
       </div>
     </div>
+  );
+}
+
+export default function Users() {
+  return (
+    <ProtectedRoute allowedRoles={['admin']} fallbackMessage="User management requires administrator access.">
+      <UsersContent />
+    </ProtectedRoute>
   );
 }

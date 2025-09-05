@@ -1,4 +1,5 @@
-import { useState } from "react";
+// client/src/pages/login.tsx - Updated for external API
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -9,12 +10,12 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { loginSchema, type LoginRequest } from "@shared/schema";
-import { Fuel } from "lucide-react";
+import { Fuel ,User } from "lucide-react";
 
 export default function Login() {
-  const [, setLocation] = useLocation();
+  const [location, setLocation] = useLocation();
   const { toast } = useToast();
-  const { login } = useAuth();
+  const { login, isAuthenticated, checkingAuth } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
 
   const form = useForm<LoginRequest>({
@@ -25,15 +26,55 @@ export default function Login() {
     },
   });
 
+  // Redirect to dashboard if already authenticated
+  useEffect(() => {
+    if (!checkingAuth && isAuthenticated) {
+      console.log('🏠 Already authenticated, redirecting to dashboard');
+      setLocation("/dashboard");
+    }
+  }, [checkingAuth, isAuthenticated, setLocation]);
+
+  // Show loading spinner while checking auth
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-blue-100">
+        <Card className="max-w-md">
+          <CardContent className="pt-6 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <h2 className="text-lg font-semibold text-gray-700">Checking authentication...</h2>
+            <p className="text-gray-500">Please wait</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Don't show login page if already authenticated (redirect will happen)
+  if (isAuthenticated) {
+    return null;
+  }
+
   const onSubmit = async (data: LoginRequest) => {
     try {
       setIsLoading(true);
+      console.log('🔐 Attempting login with external API...');
+      
       await login(data.username, data.password);
-      setLocation("/dashboard");
-    } catch (error) {
+      // Login function will handle the redirect to dashboard
+      
+    } catch (error: any) {
+      console.error('❌ Login failed:', error);
+      
+      let errorMessage = "Invalid credentials. Please try again.";
+      if (error.message.includes('404') || error.message.includes('500')) {
+        errorMessage = "Login service is currently unavailable. Please try again later.";
+      } else if (error.message.includes('network') || error.message.includes('fetch')) {
+        errorMessage = "Network connection error. Please check your internet connection.";
+      }
+      
       toast({
         title: "Login Failed",
-        description: "Invalid credentials. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -67,6 +108,7 @@ export default function Login() {
                   placeholder="Enter your username"
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition duration-200"
                   {...form.register("username")}
+                  disabled={isLoading}
                 />
                 {form.formState.errors.username && (
                   <p className="text-red-500 text-sm mt-1">{form.formState.errors.username.message}</p>
@@ -83,6 +125,7 @@ export default function Login() {
                   placeholder="Enter your password"
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent transition duration-200"
                   {...form.register("password")}
+                  disabled={isLoading}
                 />
                 {form.formState.errors.password && (
                   <p className="text-red-500 text-sm mt-1">{form.formState.errors.password.message}</p>
@@ -101,7 +144,7 @@ export default function Login() {
                   </>
                 ) : (
                   <>
-                    <i className="fas fa-sign-in-alt mr-2"></i>
+                    <User className="w-4 h-4 mr-2" />
                     Sign In
                   </>
                 )}
