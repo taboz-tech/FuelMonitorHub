@@ -1,8 +1,5 @@
-// client/src/components/layout/header.tsx - Updated for external API
+// client/src/components/layout/header.tsx - Updated without admin toggle
 import { useAuth } from "@/hooks/use-auth";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/api";
-import { queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -13,39 +10,9 @@ import {
   DropdownMenuTrigger 
 } from "@/components/ui/dropdown-menu";
 import { Fuel, ChevronDown, LogOut, User } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
 
 export default function Header() {
   const { user, logout } = useAuth();
-  const { toast } = useToast();
-
-  // Admin view mode toggle - only fetch if user is admin
-  const { data: viewModeData } = useQuery<{ viewMode: string }>({
-    queryKey: ["/api/admin/view-mode"],
-    enabled: user?.role === 'admin',
-    staleTime: 30000, // 30 seconds
-  });
-
-  const updateViewModeMutation = useMutation({
-    mutationFn: async (viewMode: string) => {
-      await apiRequest("PUT", "/api/admin/view-mode", { viewMode });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/view-mode"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      toast({
-        title: "View Mode Updated",
-        description: `Switched to ${viewModeData?.viewMode === 'closing' ? 'real-time' : 'daily closing'} view`,
-      });
-    },
-    onError: () => {
-      toast({
-        title: "Error",
-        description: "Failed to update view mode",
-        variant: "destructive",
-      });
-    },
-  });
 
   const handleLogout = async () => {
     try {
@@ -55,10 +22,6 @@ export default function Header() {
       // Force logout even if API call fails
       window.location.href = '/login';
     }
-  };
-
-  const handleViewModeToggle = (mode: string) => {
-    updateViewModeMutation.mutate(mode);
   };
 
   const getInitials = (fullName: string) => {
@@ -93,41 +56,6 @@ export default function Header() {
             </div>
             <h1 className="text-xl font-bold text-gray-900">Fuel Monitor Portal</h1>
           </div>
-
-          {/* Admin Toggle (Only for Admin Users) */}
-          {user?.role === 'admin' && (
-            <div className="flex items-center space-x-4">
-              <span className="text-sm font-medium text-gray-700">Data View:</span>
-              <div className="flex items-center bg-gray-100 rounded-lg p-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={`px-3 py-1 text-sm font-medium rounded-md transition-all duration-200 ${
-                    viewModeData?.viewMode === 'closing'
-                      ? 'bg-primary text-white'
-                      : 'text-gray-700 hover:bg-gray-200'
-                  }`}
-                  onClick={() => handleViewModeToggle('closing')}
-                  disabled={updateViewModeMutation.isPending}
-                >
-                  Daily Closing
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={`px-3 py-1 text-sm font-medium rounded-md transition-all duration-200 ${
-                    viewModeData?.viewMode === 'realtime'
-                      ? 'bg-primary text-white'
-                      : 'text-gray-700 hover:bg-gray-200'
-                  }`}
-                  onClick={() => handleViewModeToggle('realtime')}
-                  disabled={updateViewModeMutation.isPending}
-                >
-                  Real-time
-                </Button>
-              </div>
-            </div>
-          )}
 
           {/* User Menu */}
           <div className="flex items-center space-x-4">

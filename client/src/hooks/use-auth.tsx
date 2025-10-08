@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/api";
+import { AuthLoading } from "@/components/ui/loading";
 import { type User, type AuthResponse } from "@shared/schema";
 
 interface AuthContextType {
@@ -194,6 +195,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setLocation('/login');
     }
   };
+
+  // Show auth loading screen while checking authentication
+  if (checkingAuth) {
+    return <AuthLoading />;
+  }
 
   const value = {
     user,

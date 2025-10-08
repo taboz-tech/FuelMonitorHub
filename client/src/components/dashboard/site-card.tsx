@@ -196,11 +196,11 @@ export default function SiteCard({ site }: SiteCardProps) {
             {getAlertBadge(site.alertStatus, fuelLevel)}
           </div>
           
-          {/* Last Updated */}
+          {/* Fuel Level Last Updated */}
           <div className="text-xs text-gray-500 pt-2 border-t border-gray-100">
             {site.latestReading?.capturedAt ? (
               <>
-                <span className="font-medium">Last updated:</span> {formatLastUpdated(site.latestReading.capturedAt)}
+                <span className="font-medium">Fuel Level Last Updated:</span> {formatLastUpdated(site.latestReading.capturedAt)}
               </>
             ) : (
               <span className="text-orange-600 font-medium">No recent sensor data available</span>

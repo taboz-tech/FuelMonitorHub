@@ -1,9 +1,10 @@
-// client/src/components/auth/protected-route.tsx
+// client/src/components/auth/protected-route.tsx - Updated with Loading Component
 import { ReactNode } from 'react';
 import { useAuth } from '@/hooks/use-auth';
+import { PageLoading } from '@/components/ui/loading';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { AlertCircle, Loader2, Shield } from 'lucide-react';
+import { Shield } from 'lucide-react';
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -18,29 +19,31 @@ export default function ProtectedRoute({
 }: ProtectedRouteProps) {
   const { user, checkingAuth } = useAuth();
 
-  // Show loading spinner while checking authentication
+  // Show loading screen while checking authentication
   if (checkingAuth) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-          <h2 className="text-lg font-semibold text-gray-700">Checking authentication...</h2>
-          <p className="text-gray-500">Please wait</p>
-        </div>
-      </div>
+      <PageLoading 
+        message="Checking authentication..." 
+        submessage="Please wait while we verify your access"
+      />
     );
   }
 
   // If not authenticated, show nothing (redirect will happen in useAuth)
   if (!user) {
-    return null;
+    return (
+      <PageLoading 
+        message="Redirecting to login..." 
+        submessage="You need to be logged in to access this page"
+      />
+    );
   }
 
   // Check role-based access
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Card className="max-w-md">
+        <Card className="max-w-md mx-4">
           <CardContent className="pt-6 text-center">
             <Shield className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
             <h2 className="text-lg font-semibold text-gray-900 mb-2">Access Restricted</h2>
@@ -48,7 +51,7 @@ export default function ProtectedRoute({
               {fallbackMessage || `This section requires ${allowedRoles.join(' or ')} access.`}
             </p>
             <p className="text-sm text-gray-500 mb-4">
-              Current role: <span className="font-medium">{user.role}</span>
+              Current role: <span className="font-medium capitalize">{user.role}</span>
             </p>
             <Button onClick={() => window.location.href = '/dashboard'}>
               Return to Dashboard

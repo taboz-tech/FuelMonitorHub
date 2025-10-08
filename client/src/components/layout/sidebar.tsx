@@ -11,13 +11,11 @@ import {
 
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, current: false },
-  { name: 'Sites', href: '/sites', icon: MapPin, current: false },
   { name: 'Analytics', href: '/analytics', icon: TrendingUp, current: false },
 ];
 
 const adminNavigation = [
   { name: 'User Management', href: '/users', icon: Users, current: false },
-  { name: 'System Config', href: '/system-config', icon: Settings, current: false },
 ];
 
 export default function Sidebar() {
