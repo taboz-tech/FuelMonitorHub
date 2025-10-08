@@ -1,7 +1,7 @@
 import { queryClient } from "./queryClient";
 
 // Use the external API base URL (HTTPS for production)
-const API_BASE_URL = 'https://simbisa-portal-demo-api.ipos.co.zw';
+const API_BASE_URL = 'https://simbisa-portal-api.ipos.co.zw';
 
 console.log('🌐 Using external API:', API_BASE_URL);
 

@@ -5,14 +5,14 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        REACT_APP_API_BASE_URL: "https://simbisa-portal-demo-api.ipos.co.zw"
+        REACT_APP_API_BASE_URL: "https://simbisa-portal-api.ipos.co.zw"
         REACT_APP_VERSION: "1.0.0"
         GENERATE_SOURCEMAP: "false"
     ports:
       - "4173:4173"
     environment:
       - NODE_ENV=production
-      - REACT_APP_API_BASE_URL=https://simbisa-portal-demo-api.ipos.co.zw
+      - REACT_APP_API_BASE_URL=https://simbisa-portal-api.ipos.co.zw
       - REACT_APP_VERSION=1.0.0
     restart: unless-stopped
     healthcheck:
