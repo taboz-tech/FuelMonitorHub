@@ -1,7 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Fuel, Thermometer, Zap, Power } from "lucide-react";
+import { Fuel, Thermometer, Zap, Power, Wifi } from "lucide-react";
 import { type SiteWithReadings } from "@shared/schema";
 
 interface SiteCardProps {
@@ -44,6 +44,16 @@ export default function SiteCard({ site }: SiteCardProps) {
       default:
         return <Badge className="bg-green-100 text-green-800 border-green-200">Normal</Badge>;
     }
+  };
+
+  // Determine overall site online status using icingaOnline
+  const isSiteOnline = site.icingaOnline;
+
+  const getWifiStatusIndicator = () => {
+    if (isSiteOnline) {
+      return <Wifi className="w-3 h-3 text-green-500" />;
+    }
+    return <Wifi className="w-3 h-3 text-gray-400" />;
   };
 
   // Enhanced timestamp formatting
@@ -140,6 +150,10 @@ export default function SiteCard({ site }: SiteCardProps) {
             <div className="flex items-center space-x-1">
               <Zap className="w-3 h-3 text-gray-500" />
               {getStatusIndicator(site.zesaOnline, 'zesa')}
+            </div>
+            {/* Wifi Status Indicator */}
+            <div className="flex items-center">
+              {getWifiStatusIndicator()}
             </div>
           </div>
         </div>

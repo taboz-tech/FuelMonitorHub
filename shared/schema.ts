@@ -153,6 +153,7 @@ export type SiteWithReadings = Site & {
   zesaOnline: boolean;
   fuelLevelPercentage: number;
   alertStatus: 'normal' | 'low_fuel' | 'generator_off';
+  icingaOnline: boolean; 
 };
 
 export type DashboardData = {
